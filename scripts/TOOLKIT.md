@@ -9,7 +9,6 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
 - `view_image(file_path)` —— 读任意图片文件进视觉通道（支持 Linux 路径和 `C:/...`）
 
 原理：工具返回 `{type:'image', attachment}` 内容块 → 宿主 `collectImageRefs()` 递归收集 → 下一轮请求带图给模型。
-若插件不可用，退化用 OCR：`wocr.ps1`（Windows 原生 OCR，中文引擎 zh-Hans-CN，带 `-Boxes` 可返回文字坐标）。
 
 ## 二、动（鼠标/键盘）
 
@@ -58,7 +57,6 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
 8.2 **GDI+ 位图 DPI 坑（已修）**：DPI 感知进程里 `New-Object Bitmap($w,$h,$fmt)` 的分辨率会**继承屏幕 DPI**（200% 缩放 => 192），于是 `Graphics.FromImage` 的 `DpiY` 也是 192：用**磅（pt）**声明的字体会按 192dpi 渲染成 2 倍像素，再被 `ScaleTransform` 放大一次，合计 4 倍 —— 表现为"字特别大、胶囊上下 padding 极小"，且 `MeasureString` 量出的宽度同样翻倍导致胶囊虚胖。凡是画文字的位图（含 1x1 的测量位图）都要在 `Graphics.FromImage` **之前** `$bmp.SetResolution(96,96)`；或改用 `New-Object Font($name, 14, [System.Drawing.GraphicsUnit]::Pixel)` 声明字号（像素单位不受 DpiY 影响）。
 8.3 **解释器选择（pwsh 7 优先 / 5.1 回退）**：插件按 `pwsh.exe` → `powershell.exe` 顺序探测并缓存。两个运行时都要能跑：
    - `Add-Type -MemberDefinition` 引用 GDI+ 时，PS5.1 传 `System.Drawing`，PS7(.NET Core) 必须改成引用**实现程序集 + .NET 引用程序集包**（`$PSHOME\ref\*.dll` 加上 `System.Drawing.Common` / `System.Windows.Forms`），否则报 `CS1069/CS0234 找不到类型`。
-   - `wocr.ps1` 依赖 WinRT（`Windows.Media.Ocr`），**PS7 完全不支持**，只能 5.1。
    - 覆层启动若在某个 pwsh 环境下起不来（缺 WinForms/ref 包），插件会自动用 5.1 重试一次。
 8.4 **边缘柔光要用距离场，别叠线**：最早用「84 条同心圆角线」模拟渐变，问题有二 —— ① 圆角处每层弧长不同，叠加密度变化，**四角看起来发淡**；② 抗锯齿叠加留下 **条纹**（实测相邻像素波动 7.25 vs 距离场 0.89）。现在由 C# 逐像素生成（`RenderFrame`）：`d` = 到最近屏幕边缘的距离（矩形距离场，直角天然正确、四角与四边等浓度），`alpha = peak · exp(-d²/(2σ²))`。**光晕直接贴住屏幕边缘向内衰减：不留内侧空白，也没有单独的亮线描边**（早期版本在 inset 8px 处画一条 alpha 245 的亮线，看起来像描边、边缘还留白）。整屏 3072×1920 渲染约 200–330ms。
 9. **`Add-Type -MemberDefinition`**：只能放成员片段，不能放整个 class；引用 `System.Drawing` 需换传 HBITMAP 句柄
