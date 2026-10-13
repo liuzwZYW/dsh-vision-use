@@ -250,9 +250,10 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
     float cornerRadius = 40f * scale;          // 四角圆角半径（逻辑 40px）
     float ccx = w * 0.5f, ccy = h * 0.5f;
     float hx = ccx - cornerRadius, hy = ccy - cornerRadius;
-    // 圆角把屏幕角"切"到了轮廓之外（角点 d≈0.41R），只按几何走会让角部光带变窄变淡。
-    // 所以对靠近角的像素把有效距离整体压小 —— 角部光带向外鼓、饱满，直边完全不受影响。
-    float cornerBoost = 0.30f * cornerRadius;  // 角部有效距离压缩量
+    // 圆角把屏幕角切到了轮廓之外（角点 d≈0.41R），只按几何走会让角部光带变窄变淡。
+    // 因此对靠近角的像素把有效距离按比例压小（乘性）：角部光带整体加厚、向屏幕内侧扩展，
+    // 直边 g≈0 完全不受影响。
+    float cornerBoost = 0.55f;                 // 角部距离压缩比例
     float cornerSigma = cornerRadius;          // 判定"靠近角"的范围
     float invCorner = 1f / (2f * cornerSigma * cornerSigma);
     // 起始（贴边）颜色：Codex computer-use 风格的红；取消态用琥珀以示区分。向内由 alpha 衰减自然变浅
@@ -271,7 +272,7 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
         float mx = x + 0.5f; float mx2 = w - (x + 0.5f); if (mx2 < mx) mx = mx2;   // 到最近垂直边的距离
         float far1 = mx > my ? mx : my;   // 到"较远那条边"的距离：角部小、直边大
         float g = (float)System.Math.Exp(-far1 * far1 * invCorner);
-        float dEff = d - cornerBoost * g;
+        float dEff = d * (1f - cornerBoost * g);
         float a = peak * (float)System.Math.Exp(-dEff * dEff * inv2s2);
         if (a < 0.6f) continue;
         if (a > 255f) a = 255f;
