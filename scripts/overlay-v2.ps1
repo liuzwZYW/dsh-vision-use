@@ -244,9 +244,10 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
     int stride = data.Stride;
     byte[] buf = new byte[stride * h];
     float sigma = 30f * scale;                 // 向内衰减宽度（逻辑 30px）
-    float peak = 92f;                          // 贴边处的峰值 alpha
+    float peak = 105f;                         // 贴边处的峰值 alpha
     float inv2s2 = 1f / (2f * sigma * sigma);
-    int cr = cancelled ? 251 : 96, cg = cancelled ? 191 : 165, cb = cancelled ? 36 : 250;
+    // 起始（贴边）颜色用更深的蓝 / 琥珀：向内由 alpha 衰减自然变浅
+    int cr = cancelled ? 217 : 37, cg = cancelled ? 119 : 99, cb = cancelled ? 6 : 235;
     for (int y = 0; y < h; y++) {
       float dy = y + 0.5f; float dy2 = h - (y + 0.5f); if (dy2 < dy) dy = dy2;
       int row = y * stride;

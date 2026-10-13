@@ -8,6 +8,13 @@ $ErrorActionPreference = 'Stop'
 # ---- DPI：截屏与返回的 BOX 坐标统一为物理像素（必须在加载 WinForms 之前）----
 . (Join-Path $PSScriptRoot 'dpi.ps1')
 Enable-DshDpi | Out-Null
+# Windows.Media.Ocr 是 WinRT API：PowerShell 5.1（.NET Framework）自带 WinRT 投影，
+# PowerShell 7（.NET Core）已移除投影（需要额外引入 CsWinRT 程序集，本仓库不提供）。
+# 这里不做兼容，直接给出明确指引，避免抛出一堆 .NET 类型绑定异常。
+if ($PSVersionTable.PSEdition -eq 'Core') {
+  Write-Output 'OCR_REQUIRES_PS51: wocr.ps1 依赖 WinRT(Windows.Media.Ocr)，PowerShell 7 不支持；请用 powershell.exe(5.1) 运行本脚本'
+  exit 1
+}
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
 [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime] | Out-Null
 [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
