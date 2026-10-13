@@ -246,17 +246,21 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
     float sigma = 15f * scale;                 // 向内衰减宽度（逻辑 15px）
     float peak = 158f;                         // 贴边处的峰值 alpha
     float inv2s2 = 1f / (2f * sigma * sigma);
-    // 边缘形状 = "贴住屏幕边缘的圆角矩形"距离场：四条直边贴边，四角以 cornerRadius
-    // 平滑过渡（不再是直角交汇）。等值线是同心的圆角矩形，所以直边与圆角的浓度天然连续，
-    // 不需要额外的角部补偿。
+    // 边缘形状 = "贴住屏幕边缘的圆角矩形"距离场：四条直边贴边，四角以 cornerRadius 圆弧过渡。
     float cornerRadius = 40f * scale;          // 四角圆角半径（逻辑 40px）
     float ccx = w * 0.5f, ccy = h * 0.5f;
     float hx = ccx - cornerRadius, hy = ccy - cornerRadius;
+    // 圆角把屏幕角"切"到了轮廓之外（角点 d≈0.41R），只按几何走会让角部光带变窄变淡。
+    // 所以对靠近角的像素把有效距离整体压小 —— 角部光带向外鼓、饱满，直边完全不受影响。
+    float cornerBoost = 0.30f * cornerRadius;  // 角部有效距离压缩量
+    float cornerSigma = cornerRadius;          // 判定"靠近角"的范围
+    float invCorner = 1f / (2f * cornerSigma * cornerSigma);
     // 起始（贴边）颜色：Codex computer-use 风格的红；取消态用琥珀以示区分。向内由 alpha 衰减自然变浅
     int cr = cancelled ? 245 : 185, cg = cancelled ? 158 : 28, cb = cancelled ? 11 : 28;
     for (int y = 0; y < h; y++) {
       float py = y + 0.5f - ccy; if (py < 0f) py = -py;
       float qy = py - hy; float ky = qy > 0f ? qy : 0f;
+      float my = y + 0.5f; float my2 = h - (y + 0.5f); if (my2 < my) my = my2;   // 到最近水平边的距离
       int row = y * stride;
       for (int x = 0; x < w; x++) {
         float px = x + 0.5f - ccx; if (px < 0f) px = -px;
@@ -264,7 +268,11 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
         // 标准圆角矩形 SDF：d=0 在轮廓上（直边贴屏幕边缘、四角是半径 cornerRadius 的圆弧）
         float d = (float)System.Math.Sqrt(kx * kx + ky * ky)
                 + System.Math.Min(System.Math.Max(qx, qy), 0f) - cornerRadius;
-        float a = peak * (float)System.Math.Exp(-d * d * inv2s2);
+        float mx = x + 0.5f; float mx2 = w - (x + 0.5f); if (mx2 < mx) mx = mx2;   // 到最近垂直边的距离
+        float far1 = mx > my ? mx : my;   // 到"较远那条边"的距离：角部小、直边大
+        float g = (float)System.Math.Exp(-far1 * far1 * invCorner);
+        float dEff = d - cornerBoost * g;
+        float a = peak * (float)System.Math.Exp(-dEff * dEff * inv2s2);
         if (a < 0.6f) continue;
         if (a > 255f) a = 255f;
         int o = row + x * 4;
