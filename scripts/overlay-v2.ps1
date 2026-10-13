@@ -243,25 +243,27 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
   try {
     int stride = data.Stride;
     byte[] buf = new byte[stride * h];
-    float sigma = 15f * scale;                 // 向内衰减宽度（逻辑 15px，已减半）
-    float peak = 158f;                         // 贴边处的峰值 alpha（红主题下再加深）
+    float sigma = 15f * scale;                 // 向内衰减宽度（逻辑 15px）
+    float peak = 158f;                         // 贴边处的峰值 alpha
     float inv2s2 = 1f / (2f * sigma * sigma);
-    // 直角处两条光带交汇，观感上比直边"瘦"：把角部的有效距离按比例压小，
-    // 让角部的等值线向外鼓出（渐变带更宽更浓），四角与四边观感一致。
-    float cornerBoost = 0.42f;                 // 角部有效距离压缩比例
-    float cornerSigma = 21f * scale;           // 角部影响范围（逻辑 21px，随带宽减半）
-    float invCorner = 1f / (2f * cornerSigma * cornerSigma);
+    // 边缘形状 = "贴住屏幕边缘的圆角矩形"距离场：四条直边贴边，四角以 cornerRadius
+    // 平滑过渡（不再是直角交汇）。等值线是同心的圆角矩形，所以直边与圆角的浓度天然连续，
+    // 不需要额外的角部补偿。
+    float cornerRadius = 40f * scale;          // 四角圆角半径（逻辑 40px）
+    float ccx = w * 0.5f, ccy = h * 0.5f;
+    float hx = ccx - cornerRadius, hy = ccy - cornerRadius;
     // 起始（贴边）颜色：Codex computer-use 风格的红；取消态用琥珀以示区分。向内由 alpha 衰减自然变浅
     int cr = cancelled ? 245 : 185, cg = cancelled ? 158 : 28, cb = cancelled ? 11 : 28;
     for (int y = 0; y < h; y++) {
-      float dy = y + 0.5f; float dy2 = h - (y + 0.5f); if (dy2 < dy) dy = dy2;
+      float py = y + 0.5f - ccy; if (py < 0f) py = -py;
+      float qy = py - hy; float ky = qy > 0f ? qy : 0f;
       int row = y * stride;
       for (int x = 0; x < w; x++) {
-        float dx = x + 0.5f; float dx2 = w - (x + 0.5f); if (dx2 < dx) dx = dx2;
-        float n = dx < dy ? dx : dy;           // 到最近边的距离
-        float m = dx < dy ? dy : dx;           // 到另一条边的距离（角部也小）
-        float g = (float)System.Math.Exp(-m * m * invCorner);
-        float d = n * (1f - cornerBoost * g);
+        float px = x + 0.5f - ccx; if (px < 0f) px = -px;
+        float qx = px - hx; float kx = qx > 0f ? qx : 0f;
+        // 标准圆角矩形 SDF：d=0 在轮廓上（直边贴屏幕边缘、四角是半径 cornerRadius 的圆弧）
+        float d = (float)System.Math.Sqrt(kx * kx + ky * ky)
+                + System.Math.Min(System.Math.Max(qx, qy), 0f) - cornerRadius;
         float a = peak * (float)System.Math.Exp(-d * d * inv2s2);
         if (a < 0.6f) continue;
         if (a > 255f) a = 255f;
