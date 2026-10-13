@@ -20,10 +20,15 @@ Enable-DshDpi | Out-Null
 $DpiScale = Get-DshDpiScale
 if ($DpiScale -le 0) { $DpiScale = 1.0 }
 BootLog ("dpi scale=" + $DpiScale + " awareness=" + (Get-DshDpiAwareness))
-Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+if ($PSVersionTable.PSEdition -eq 'Core') {
+  Add-Type -AssemblyName System.Drawing.Common    # PS7(.NET) 下 GDI+ 的真正实现程序集
+} else {
+  Add-Type -AssemblyName System.Drawing
+}
 
 # ================= C# 动画引擎（热路径全在编译代码里，PowerShell 只敲节拍）=================
-Add-Type -Namespace CU -Name Eng -ReferencedAssemblies System.Drawing -MemberDefinition @'
+$engCode = @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern short GetAsyncKeyState(int v);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetDC(System.IntPtr h);
@@ -224,7 +229,95 @@ static void RenderRippleWindow() {
 }
 public static string GetMode() { return _autoMode; }
 public static int EscDown() { return (GetAsyncKeyState(0x1B) & 0x8000) != 0 ? 1 : 0; }
+
+// ==================== 边缘柔光（距离场渲染）====================
+// 用圆角矩形的有符号距离场逐像素生成"亮线 + 柔光"：
+//   * 四边和四角来自同一个距离函数，浓度天然一致 —— 不再是"叠 84 条同心圆角线"，
+//     那种做法在四角弧长处层间距变大（看起来四角发淡），而且抗锯齿叠加会留下条纹；
+//   * 输出按物理像素直接写位图，配合 ScaleTransform 的逻辑坐标口径（参数乘 scale）。
+public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool cancelled) {
+  System.Drawing.Bitmap bmp = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+  bmp.SetResolution(96f, 96f);
+  System.Drawing.Rectangle rect = new System.Drawing.Rectangle(0, 0, w, h);
+  System.Drawing.Imaging.BitmapData data = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+  try {
+    int stride = data.Stride;
+    byte[] buf = new byte[stride * h];
+    float lineInset = 8f * scale;      // 亮线中心到屏幕边缘（逻辑 8px）
+    float lineSigma = 1.9f * scale;    // 亮线半宽
+    float glowSigma = 30f * scale;     // 柔光向内衰减
+    float glowPeak = 78f;              // 柔光峰值 alpha
+    float linePeak = 245f;             // 亮线峰值 alpha
+    float outerSigma = 5f * scale;     // 亮线外侧收边，避免最外圈出现硬边
+    float corner = 30f * scale;        // 圆角半径
+    int mr = cancelled ? 245 : 59, mg = cancelled ? 158 : 130, mb = cancelled ? 11 : 246;
+    int br = cancelled ? 253 : 147, bg = cancelled ? 186 : 197, bb = cancelled ? 116 : 253;
+    float cx = w * 0.5f, cy = h * 0.5f;
+    float hx = cx - lineInset - corner; if (hx < 0f) hx = 0f;
+    float hy = cy - lineInset - corner; if (hy < 0f) hy = 0f;
+    for (int y = 0; y < h; y++) {
+      float ay = System.Math.Abs(y + 0.5f - cy) - hy;
+      float oy = ay > 0f ? ay : 0f;
+      int row = y * stride;
+      for (int x = 0; x < w; x++) {
+        float ax = System.Math.Abs(x + 0.5f - cx) - hx;
+        float ox = ax > 0f ? ax : 0f;
+        float d = (float)(System.Math.Sqrt(ox * ox + oy * oy) + System.Math.Min(System.Math.Max(ax, ay), 0f) - corner);
+        float t1 = d / lineSigma;
+        float aLine = linePeak * (float)System.Math.Exp(-t1 * t1);
+        float t2 = d / glowSigma;
+        float aGlow = glowPeak * (float)System.Math.Exp(-t2 * t2);
+        if (d > 0f) {                                   // 亮线外侧：快速收边
+          float t3 = d / outerSigma;
+          float fade = (float)System.Math.Exp(-t3 * t3);
+          aLine *= fade; aGlow *= fade;
+        }
+        float a = aLine + aGlow * (1f - aLine / 255f);
+        if (a < 0.6f) continue;
+        if (a > 255f) a = 255f;
+        float wl = aLine, wg = aGlow * (1f - aLine / 255f);
+        float tot = wl + wg;
+        float cr2, cg2, cb2;
+        if (tot <= 0.0001f) { cr2 = br; cg2 = bg; cb2 = bb; }
+        else {
+          cr2 = (br * wl + mr * wg) / tot;
+          cg2 = (bg * wl + mg * wg) / tot;
+          cb2 = (bb * wl + mb * wg) / tot;
+        }
+        int o = row + x * 4;
+        buf[o] = (byte)(cb2 + 0.5f);
+        buf[o + 1] = (byte)(cg2 + 0.5f);
+        buf[o + 2] = (byte)(cr2 + 0.5f);
+        buf[o + 3] = (byte)(a + 0.5f);
+      }
+    }
+    System.Runtime.InteropServices.Marshal.Copy(buf, 0, data.Scan0, buf.Length);
+  } finally {
+    bmp.UnlockBits(data);
+  }
+  return bmp;
+}
 '@
+
+# 编译引擎：PS5.1(.NET Framework) 直接引用 System.Drawing；
+# PS7(.NET Core) 里 System.Drawing 只是类型转发程序集，需要 .NET 的"引用程序集"包
+# ($PSHOME\ref，提供 System.Runtime/System.Collections 等) 再加上 GDI+/WinForms 的实现程序集。
+if ($PSVersionTable.PSEdition -eq 'Core') {
+  $engRefs = @()
+  $refDir = Join-Path $PSHOME 'ref'
+  if (Test-Path -LiteralPath $refDir) {
+    $engRefs += (Get-ChildItem -LiteralPath $refDir -Filter '*.dll' | Select-Object -ExpandProperty FullName)
+  }
+  $engRefs += @(
+    [System.Drawing.Bitmap].Assembly.Location,
+    [System.Drawing.Size].Assembly.Location,
+    [System.Windows.Forms.Form].Assembly.Location
+  )
+  $engRefs = $engRefs | Where-Object { $_ } | Select-Object -Unique
+  Add-Type -Namespace CU -Name Eng -ReferencedAssemblies $engRefs -MemberDefinition $engCode
+} else {
+  Add-Type -Namespace CU -Name Eng -ReferencedAssemblies System.Drawing -MemberDefinition $engCode
+}
 
 function FlagPath([string]$k) { return (Join-Path $FlagDir ("dsh_agent_" + $k + ".flag")) }
 function SetFlag([string]$k, [string]$c) { Set-Content -LiteralPath (FlagPath $k) -Value $c -Encoding UTF8 -ErrorAction SilentlyContinue }
@@ -284,28 +377,12 @@ function RoundPath([double]$x, [double]$y, [double]$w, [double]$h, [double]$r) {
   $p.CloseFigure(); return $p
 }
 function Render-Border([int]$w, [int]$h, [bool]$cancelled, [double]$scale = 1.0) {
-  $surf = New-DrawSurface $w $h $scale
-  $bmp = $surf.Bmp; $g = $surf.G
-  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $g.Clear([System.Drawing.Color]::Transparent)
-  $main = if ($cancelled) { @(245,158,11) } else { @(59,130,246) }
-  $bright = if ($cancelled) { @(253,186,116) } else { @(147,197,253) }
-  # 柔光渐变：初始不透明度提高（更"重"）、衰减更缓。坐标全是逻辑像素，
-  # 由 New-DrawSurface 的 ScaleTransform 按 DPI 放大（200% 下 1 逻辑 = 2 物理）。
-  for ($i = 0; $i -lt 84; $i++) {
-    $alpha = [int](76 * [Math]::Exp(-[Math]::Pow($i / 30.0, 2)))
-    if ($alpha -le 0) { continue }
-    $ins = 9 + $i
-    # 笔宽 2.0 > 每层内缩 1.0：让相邻层互相覆盖，否则浓度一高就看出 84 条线之间的条纹
-    $pen = New-Object System.Drawing.Pen((Col $main[0] $main[1] $main[2] $alpha), 2.0)
-    $g.DrawPath($pen, (RoundPath $ins $ins ($w - 2*$ins) ($h - 2*$ins) (30 + $i * 0.15)))
-    $pen.Dispose()
-  }
-  $penA = New-Object System.Drawing.Pen((Col $bright[0] $bright[1] $bright[2] 245), 3.0)
-  $g.DrawPath($penA, (RoundPath 8 8 ($w - 16) ($h - 16) 30)); $penA.Dispose()
-  $penB = New-Object System.Drawing.Pen((Col $main[0] $main[1] $main[2] 140), 1.4)
-  $g.DrawPath($penB, (RoundPath 3 3 ($w - 6) ($h - 6) 32)); $penB.Dispose()
-  $g.Dispose(); return $bmp
+  # 交给 C# 用圆角矩形距离场逐像素渲染（见 RenderFrame）：
+  # 四边/四角浓度一致（旧版叠 84 条同心圆角线会让四角发淡），且完全没有叠线条纹。
+  # $w/$h 是逻辑尺寸，乘 scale 得到物理位图尺寸。
+  $pw = [int][Math]::Ceiling($w * $scale)
+  $ph = [int][Math]::Ceiling($h * $scale)
+  return [CU.Eng]::RenderFrame($pw, $ph, [float]$scale, $cancelled)
 }
 # ---- 徽章（按模式渲染，切换时才重画）----
 function Render-Badge([string]$mode, [bool]$cancelled, [string]$fontName, [double]$scale = 1.0) {
@@ -426,13 +503,15 @@ function New-CuCursor([string]$path, [string]$style, [double]$scale = 1.0) {
     $finger.Dispose(); $palm.Dispose(); $thumb.Dispose()
     $hotX = 13; $hotY = 5
   } else {
-    $pts = @(
+    # 显式声明成 PointF[]：PS7(.NET Core) 的绑定器比 5.1 严格，
+    # 传 object[] 给 DrawPolygon/FillPolygon 会直接报"无法转换 points 参数"。
+    [System.Drawing.PointF[]]$pts = @(
       (New-Object System.Drawing.PointF(5, 3)), (New-Object System.Drawing.PointF(5, 37)),
       (New-Object System.Drawing.PointF(13, 29)), (New-Object System.Drawing.PointF(19, 43)),
       (New-Object System.Drawing.PointF(26, 40)), (New-Object System.Drawing.PointF(20, 26)),
       (New-Object System.Drawing.PointF(31, 26))
     )
-    $shadowPts = $pts | ForEach-Object { New-Object System.Drawing.PointF(($_.X + 1.4), ($_.Y + 1.6)) }
+    [System.Drawing.PointF[]]$shadowPts = @($pts | ForEach-Object { New-Object System.Drawing.PointF(($_.X + 1.4), ($_.Y + 1.6)) })
     $g.FillPolygon((New-Object System.Drawing.SolidBrush((Col 15 23 42 60))), $shadowPts)
     $lg = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
       (New-Object System.Drawing.PointF(6, 4)), (New-Object System.Drawing.PointF(28, 42)),
@@ -496,10 +575,12 @@ $haloForm = MakeWindow 0 0 $haloSizePx $haloSizePx
 $rippleForm = MakeWindow 0 0 $rippleSizePx $rippleSizePx
 $rippleForm.Hide()
 
+$renderSw = [System.Diagnostics.Stopwatch]::StartNew()
 $borderBmp = Render-Border $vsLogW $vsLogH $false $sc
 Push-Bitmap $borderForm $borderBmp $vs.X $vs.Y
 Push-Bitmap $badgeForm $badgeBmp ([int](($vs.Width - $badgeBmp.Width) / 2 + $vs.X)) $badgeTop
-BootLog ('C# engine ready screen=' + $vs.Width + 'x' + $vs.Height + ' scale=' + $sc)
+$renderSw.Stop()
+BootLog ('C# engine ready screen=' + $vs.Width + 'x' + $vs.Height + ' scale=' + $sc + ' frame=' + $renderSw.ElapsedMilliseconds + 'ms')
 [CU.Eng]::Init($haloForm.Handle, $HaloSize, [float]$sc)
 [CU.Eng]::InitRipple($rippleForm.Handle, 240, [float]$sc)
 

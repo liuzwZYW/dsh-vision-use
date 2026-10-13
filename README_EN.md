@@ -114,10 +114,21 @@ Self-check: `computer_status` prints `SCREEN 3072x1920 ORIGIN 0,0 DPI 192 SCALE 
 |---|---|
 | Host (auto-detected) | **Windows native** or **Windows + WSL2**; the plugin detects where DSH runs and picks the matching path/subprocess strategy |
 | Interop when on WSL | WSL interop enabled (`/proc/sys/fs/binfmt_misc/WSLInterop` = enabled); the plugin uses `\\wsl.localhost\<distro>` UNC paths automatically |
-| Windows side | PowerShell 5.1 (built in) + .NET Framework (System.Drawing/WinForms) |
+| Windows side | **PowerShell 7 (`pwsh`) preferred, falling back to the built-in PowerShell 5.1**; GDI+/WinForms (`System.Drawing`) |
+| OCR exception | `scripts/wocr.ps1` relies on WinRT (`Windows.Media.Ocr`); PS7 has no WinRT projection, so it **must run on PowerShell 5.1** |
 | DSH | `>= 0.1.5-rc.1` |
 | Node | The plugin itself has zero runtime dependencies (pure ESM + PowerShell child processes) |
 | Linux / macOS | Desktop control is unsupported; `view_screen` and hands tools fail with a clear error, while `view_image` still works |
+
+### PowerShell interpreter selection
+
+At startup the plugin probes `pwsh.exe` (PowerShell 7) first, then `powershell.exe` (5.1), and caches the result. `computer_status` reports which interpreter is actually in use:
+
+| Purpose | Behavior |
+|---|---|
+| `view_screen` capture script, `cu.ps1` (mouse/keyboard) | Uses pwsh 7 (faster process startup); falls back to 5.1 when pwsh is absent |
+| `overlay-v2.ps1` (overlay) | Prefers pwsh 7 (the C# engine compiles on both .NET and .NET Framework); if that pwsh lacks WinForms / ref assemblies and the overlay fails to come up, it retries once with 5.1 |
+| `wocr.ps1` (local OCR) | **Always 5.1** — WinRT APIs are unavailable on PS7 |
 
 ---
 

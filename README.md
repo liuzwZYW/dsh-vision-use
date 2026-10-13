@@ -116,10 +116,21 @@ Windows 会把「没有声明 DPI 感知」的进程偷偷虚拟化：`SystemInf
 |---|---|
 | 宿主（自动识别） | **Windows 原生** 或 **Windows + WSL2**；插件自动识别 DSH 所在环境并选择对应路径/子进程方案 |
 | WSL 时的互操作 | WSL interop 开启（`/proc/sys/fs/binfmt_misc/WSLInterop` = enabled）；插件自动走 `\\wsl.localhost\<distro>` UNC 路径 |
-| Windows 侧 | PowerShell 5.1（系统自带）+ .NET Framework（System.Drawing/WinForms）|
+| Windows 侧 | **PowerShell 7（`pwsh`）优先，自动回退系统自带 PowerShell 5.1**；GDI+/WinForms（`System.Drawing`）|
+| OCR 例外 | `scripts/wocr.ps1` 依赖 WinRT（`Windows.Media.Ocr`），PS7 不支持 WinRT 投影，**只能用 PowerShell 5.1 跑** |
 | DSH | `>= 0.1.5-rc.1` |
 | Node | 插件本身零运行时依赖（纯 ESM + 子进程调 PowerShell）|
 | Linux / macOS | 不支持桌面控制；`view_screen` 与 hands 工具会明确报错，`view_image` 仍可用 |
+
+### PowerShell 解释器选择
+
+插件启动时按 `pwsh.exe`（PowerShell 7）→ `powershell.exe`（5.1）顺序探测并缓存结果，`computer_status` 会报当前实际使用的解释器：
+
+| 用途 | 行为 |
+|---|---|
+| `view_screen` 截图脚本、`cu.ps1`（鼠标/键盘）| 用 pwsh 7（进程启动更快）；pwsh 不存在时用 5.1 |
+| `overlay-v2.ps1`（覆盖层）| 优先 pwsh 7（C# 引擎在 .NET 与 .NET Framework 上都能编译）；若该 pwsh 环境缺 WinForms / ref 程序集导致起不来，会自动改用 5.1 重试一次 |
+| `wocr.ps1`（本地 OCR）| **固定用 5.1** —— WinRT API 在 PS7 上不可用 |
 
 ---
 
