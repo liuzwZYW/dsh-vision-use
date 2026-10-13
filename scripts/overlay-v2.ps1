@@ -230,11 +230,11 @@ static void RenderRippleWindow() {
 public static string GetMode() { return _autoMode; }
 public static int EscDown() { return (GetAsyncKeyState(0x1B) & 0x8000) != 0 ? 1 : 0; }
 
-// ==================== 边缘柔光（距离场渲染）====================
-// 用圆角矩形的有符号距离场逐像素生成"亮线 + 柔光"：
-//   * 四边和四角来自同一个距离函数，浓度天然一致 —— 不再是"叠 84 条同心圆角线"，
-//     那种做法在四角弧长处层间距变大（看起来四角发淡），而且抗锯齿叠加会留下条纹；
-//   * 输出按物理像素直接写位图，配合 ScaleTransform 的逻辑坐标口径（参数乘 scale）。
+// ==================== 边缘柔光（贴边矩形距离场）====================
+// 光晕直接贴住屏幕边缘：不留内侧空白，也没有单独的最亮描边线。
+//   d = 到最近屏幕边缘的距离（矩形距离场，直角天然正确，四角与四边等浓度）
+//   alpha = peak * exp(-d^2 / (2*sigma^2))
+// 完全平滑（没有叠线造成的条纹），整屏 3072x1920 约 200-300ms。
 public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool cancelled) {
   System.Drawing.Bitmap bmp = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
   bmp.SetResolution(96f, 96f);
@@ -243,51 +243,23 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
   try {
     int stride = data.Stride;
     byte[] buf = new byte[stride * h];
-    float lineInset = 8f * scale;      // 亮线中心到屏幕边缘（逻辑 8px）
-    float lineSigma = 1.9f * scale;    // 亮线半宽
-    float glowSigma = 30f * scale;     // 柔光向内衰减
-    float glowPeak = 78f;              // 柔光峰值 alpha
-    float linePeak = 245f;             // 亮线峰值 alpha
-    float outerSigma = 5f * scale;     // 亮线外侧收边，避免最外圈出现硬边
-    float corner = 30f * scale;        // 圆角半径
-    int mr = cancelled ? 245 : 59, mg = cancelled ? 158 : 130, mb = cancelled ? 11 : 246;
-    int br = cancelled ? 253 : 147, bg = cancelled ? 186 : 197, bb = cancelled ? 116 : 253;
-    float cx = w * 0.5f, cy = h * 0.5f;
-    float hx = cx - lineInset - corner; if (hx < 0f) hx = 0f;
-    float hy = cy - lineInset - corner; if (hy < 0f) hy = 0f;
+    float sigma = 30f * scale;                 // 向内衰减宽度（逻辑 30px）
+    float peak = 92f;                          // 贴边处的峰值 alpha
+    float inv2s2 = 1f / (2f * sigma * sigma);
+    int cr = cancelled ? 251 : 96, cg = cancelled ? 191 : 165, cb = cancelled ? 36 : 250;
     for (int y = 0; y < h; y++) {
-      float ay = System.Math.Abs(y + 0.5f - cy) - hy;
-      float oy = ay > 0f ? ay : 0f;
+      float dy = y + 0.5f; float dy2 = h - (y + 0.5f); if (dy2 < dy) dy = dy2;
       int row = y * stride;
       for (int x = 0; x < w; x++) {
-        float ax = System.Math.Abs(x + 0.5f - cx) - hx;
-        float ox = ax > 0f ? ax : 0f;
-        float d = (float)(System.Math.Sqrt(ox * ox + oy * oy) + System.Math.Min(System.Math.Max(ax, ay), 0f) - corner);
-        float t1 = d / lineSigma;
-        float aLine = linePeak * (float)System.Math.Exp(-t1 * t1);
-        float t2 = d / glowSigma;
-        float aGlow = glowPeak * (float)System.Math.Exp(-t2 * t2);
-        if (d > 0f) {                                   // 亮线外侧：快速收边
-          float t3 = d / outerSigma;
-          float fade = (float)System.Math.Exp(-t3 * t3);
-          aLine *= fade; aGlow *= fade;
-        }
-        float a = aLine + aGlow * (1f - aLine / 255f);
+        float dx = x + 0.5f; float dx2 = w - (x + 0.5f); if (dx2 < dx) dx = dx2;
+        float d = dx < dy ? dx : dy;
+        float a = peak * (float)System.Math.Exp(-d * d * inv2s2);
         if (a < 0.6f) continue;
         if (a > 255f) a = 255f;
-        float wl = aLine, wg = aGlow * (1f - aLine / 255f);
-        float tot = wl + wg;
-        float cr2, cg2, cb2;
-        if (tot <= 0.0001f) { cr2 = br; cg2 = bg; cb2 = bb; }
-        else {
-          cr2 = (br * wl + mr * wg) / tot;
-          cg2 = (bg * wl + mg * wg) / tot;
-          cb2 = (bb * wl + mb * wg) / tot;
-        }
         int o = row + x * 4;
-        buf[o] = (byte)(cb2 + 0.5f);
-        buf[o + 1] = (byte)(cg2 + 0.5f);
-        buf[o + 2] = (byte)(cr2 + 0.5f);
+        buf[o] = (byte)cb;
+        buf[o + 1] = (byte)cg;
+        buf[o + 2] = (byte)cr;
         buf[o + 3] = (byte)(a + 0.5f);
       }
     }
@@ -377,7 +349,8 @@ function RoundPath([double]$x, [double]$y, [double]$w, [double]$h, [double]$r) {
   $p.CloseFigure(); return $p
 }
 function Render-Border([int]$w, [int]$h, [bool]$cancelled, [double]$scale = 1.0) {
-  # 交给 C# 用圆角矩形距离场逐像素渲染（见 RenderFrame）：
+  # 交给 C# 用"贴边矩形距离场"逐像素渲染（见 RenderFrame）：
+  # 光晕贴在屏幕最外圈、向内高斯衰减，没有内侧留白也没有单独的亮线描边；
   # 四边/四角浓度一致（旧版叠 84 条同心圆角线会让四角发淡），且完全没有叠线条纹。
   # $w/$h 是逻辑尺寸，乘 scale 得到物理位图尺寸。
   $pw = [int][Math]::Ceiling($w * $scale)

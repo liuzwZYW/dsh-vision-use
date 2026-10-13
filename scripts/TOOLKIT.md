@@ -60,7 +60,7 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
    - `Add-Type -MemberDefinition` 引用 GDI+ 时，PS5.1 传 `System.Drawing`，PS7(.NET Core) 必须改成引用**实现程序集 + .NET 引用程序集包**（`$PSHOME\ref\*.dll` 加上 `System.Drawing.Common` / `System.Windows.Forms`），否则报 `CS1069/CS0234 找不到类型`。
    - `wocr.ps1` 依赖 WinRT（`Windows.Media.Ocr`），**PS7 完全不支持**，只能 5.1。
    - 覆层启动若在某个 pwsh 环境下起不来（缺 WinForms/ref 包），插件会自动用 5.1 重试一次。
-8.4 **边缘柔光要用距离场，别叠线**：最早用「84 条同心圆角线」模拟渐变，问题有二 —— ① 圆角处每层弧长不同，叠加密度变化，**四角看起来发淡**；② 抗锯齿叠加留下 **条纹**（实测相邻像素波动 7.25 vs 距离场 0.89）。现在由 C# 按圆角矩形**有符号距离场**逐像素生成（`RenderFrame`）：`d = length(max(|p|-b+r,0)) + min(max(qx,qy),0) - r`，再取 `alpha = peak · exp(-(d/σ)²)`，四边四角天然一致且完全平滑。整屏 3072×1920 渲染约 270–330ms。
+8.4 **边缘柔光要用距离场，别叠线**：最早用「84 条同心圆角线」模拟渐变，问题有二 —— ① 圆角处每层弧长不同，叠加密度变化，**四角看起来发淡**；② 抗锯齿叠加留下 **条纹**（实测相邻像素波动 7.25 vs 距离场 0.89）。现在由 C# 逐像素生成（`RenderFrame`）：`d` = 到最近屏幕边缘的距离（矩形距离场，直角天然正确、四角与四边等浓度），`alpha = peak · exp(-d²/(2σ²))`。**光晕直接贴住屏幕边缘向内衰减：不留内侧空白，也没有单独的亮线描边**（早期版本在 inset 8px 处画一条 alpha 245 的亮线，看起来像描边、边缘还留白）。整屏 3072×1920 渲染约 200–330ms。
 9. **`Add-Type -MemberDefinition`**：只能放成员片段，不能放整个 class；引用 `System.Drawing` 需换传 HBITMAP 句柄
 10. **`SendInput` 的 INPUT 结构体**：x64 上 union 按 `MOUSEINPUT` 对齐 = **40 字节**（只算 KEYBDINPUT 的 32 字节会被 API 直接拒绝，返回 0）
 
