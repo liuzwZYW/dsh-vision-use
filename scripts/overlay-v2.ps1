@@ -76,6 +76,7 @@ public static void Init(System.IntPtr hwnd, int size, float scale) {
   // 位图按物理像素分配，绘制沿用 96dpi 逻辑坐标并由变换放大 —— 与 DPI 一致且不发虚
   int px = (int)System.Math.Ceiling(size * _scale);
   _bmp = new System.Drawing.Bitmap(px, px, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+  _bmp.SetResolution(96f, 96f);   // 与逻辑坐标系一致（否则 DPI 感知进程里 DpiY=192，将来在光环上画字会大一倍）
   _g = System.Drawing.Graphics.FromImage(_bmp);
   _g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
   _g.ScaleTransform(_scale, _scale);
@@ -184,6 +185,7 @@ public static void InitRipple(System.IntPtr hwnd, int size, float scale) {
   _rScale = (scale <= 0f) ? 1f : scale;
   int px = (int)System.Math.Ceiling(size * _rScale);
   _rBmp = new System.Drawing.Bitmap(px, px, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+  _rBmp.SetResolution(96f, 96f);
   _rG = System.Drawing.Graphics.FromImage(_rBmp);
   _rG.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
   _rG.ScaleTransform(_rScale, _rScale);
@@ -255,6 +257,11 @@ function New-DrawSurface([int]$logicalW, [int]$logicalH, [double]$scale) {
   if ($pw -lt 1) { $pw = 1 }
   if ($ph -lt 1) { $ph = 1 }
   $bmp = New-Object System.Drawing.Bitmap($pw, $ph, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  # 关键：DPI 感知进程里 new Bitmap(w,h) 的分辨率会继承屏幕 DPI（200% 缩放 = 192），
+  # 于是 Graphics.DpiY=192，10.5pt 字体会按 192dpi 渲染成 28px，再被 ScaleTransform
+  # 放大一次 → 文字比胶囊几何大了一倍（表现为"字体很大、上下 padding 很小"）。
+  # 必须在 Graphics.FromImage 之前把位图分辨率钉成 96dpi，与逻辑坐标系一致。
+  $bmp.SetResolution(96, 96)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.ScaleTransform([float]$scale, [float]$scale)
   return @{ Bmp = $bmp; G = $g }
@@ -298,7 +305,7 @@ function Render-Badge([string]$mode, [bool]$cancelled, [string]$fontName, [doubl
   $font = New-Object System.Drawing.Font($fontName, 10.5)
   $fontEsc = New-Object System.Drawing.Font('Segoe UI', 8.5)
   $fontChip = New-Object System.Drawing.Font($fontName, 9)
-  $mb = New-Object System.Drawing.Bitmap(1, 1); $mg = [System.Drawing.Graphics]::FromImage($mb)
+  $mb = New-Object System.Drawing.Bitmap(1, 1); $mb.SetResolution(96, 96); $mg = [System.Drawing.Graphics]::FromImage($mb)   # 测量基准同样钉在 96dpi，否则测得的宽度也是 2 倍
   $wText = $mg.MeasureString($txt, $font).Width
   $wEsc = $mg.MeasureString('Esc', $fontEsc).Width
   $wChip = if ($chip) { $mg.MeasureString($chip, $fontChip).Width + 18 } else { 0 }

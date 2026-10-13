@@ -55,6 +55,7 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
 7. **模态对话框会阻塞一切**：检测到操作"无效"时，先 `view_screen` 看有没有对话框在等你
 8. **PowerShell 5.1 坑**：脚本文件要 UTF-8 BOM（否则中文按 ANSI 读）；输出中文先设 `[Console]::OutputEncoding`
 8.1 **高 DPI 坑（已修）**：桌面侧脚本一律先 `. "$PSScriptRoot\dpi.ps1"` + `Enable-DshDpi`，且必须在 `Add-Type -AssemblyName System.Windows.Forms` **之前**。否则进程是 DPI-unaware：`VirtualScreen` 只有逻辑分辨率、`CopyFromScreen` 只截到物理屏左上 1/scale、覆盖层只铺满那一角还被系统拉伸。覆盖层里的绘制一律用 96dpi 逻辑坐标 + `New-DrawSurface`（内部 `ScaleTransform`），位图仍是物理像素 —— 千万别把物理尺寸再乘一遍 scale。
+8.2 **GDI+ 位图 DPI 坑（已修）**：DPI 感知进程里 `New-Object Bitmap($w,$h,$fmt)` 的分辨率会**继承屏幕 DPI**（200% 缩放 => 192），于是 `Graphics.FromImage` 的 `DpiY` 也是 192：用**磅（pt）**声明的字体会按 192dpi 渲染成 2 倍像素，再被 `ScaleTransform` 放大一次，合计 4 倍 —— 表现为"字特别大、胶囊上下 padding 极小"，且 `MeasureString` 量出的宽度同样翻倍导致胶囊虚胖。凡是画文字的位图（含 1x1 的测量位图）都要在 `Graphics.FromImage` **之前** `$bmp.SetResolution(96,96)`；或改用 `New-Object Font($name, 14, [System.Drawing.GraphicsUnit]::Pixel)` 声明字号（像素单位不受 DpiY 影响）。
 9. **`Add-Type -MemberDefinition`**：只能放成员片段，不能放整个 class；引用 `System.Drawing` 需换传 HBITMAP 句柄
 10. **`SendInput` 的 INPUT 结构体**：x64 上 union 按 `MOUSEINPUT` 对齐 = **40 字节**（只算 KEYBDINPUT 的 32 字节会被 API 直接拒绝，返回 0）
 
