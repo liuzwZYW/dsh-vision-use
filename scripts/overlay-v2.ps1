@@ -1,4 +1,4 @@
-param(
+﻿param(
   [ValidateSet('start','stop','status')][string]$Action = 'start',
   [int]$MaxSeconds = 0,
   [int]$IdleSeconds = 30,
