@@ -31,7 +31,7 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
 ## 三、特效与 ESC 中止
 
 `overlay-v2.ps1 -Action start|stop|status [-MaxSeconds N] [-IdleSeconds N] [-NoCursorChange]`
-- 蓝色柔光边框（逐像素 Alpha）+ 顶部玻璃徽章 + 蓝色定制光标 + 跟随光环
+- 红色柔光边框（逐像素 Alpha）+ 顶部玻璃徽章 + 红色定制光标 + 跟随光环
 - 每 50ms 轮询 `GetAsyncKeyState(VK_ESCAPE)`；按下 → 写取消标志 → 徽章变琥珀色「已取消」→ 2.2s 后退出并恢复系统光标
 - 标志目录：由插件通过 `DSH_VISION_FLAG_DIR` 传入（Windows 原生 = `%TEMP%`；WSL = `\\wsl.localhost\<distro>\tmp`），不再双写
 - `cu.ps1` 每个动作执行前检查该标志，被取消即拒动（exit 9）
@@ -100,7 +100,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$OV" -Action stop
 
 | 状态 | 视觉 |
 |---|---|
-| 移动 | 蓝色光环 + 锥形平滑光尾（双通道：外发光+亮核，30 帧历史）|
+| 移动 | 红色光环 + 锥形平滑光尾（双通道：外发光+亮核，30 帧历史）|
 | 输入 | **青色**光环 + 中心竖线光标（IC 文字光标）|
 | 点击 | **琥珀色**光环 + 扩散涟漪（1.2 秒）|
 | 取消 | 边框/徽章转琥珀「已取消」，2.2 秒后退出 |
@@ -130,6 +130,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$OV" -Action stop
 
 ## 光标说明（当前行为）
 
-- 覆盖层默认安装一套蓝白风格光标（箭头 / I 形 / 手指），启动参数 `-NoCursorChange` 可关闭并保留系统默认。
+- 覆盖层默认安装一套红白风格光标（箭头 / I 形 / 手指），启动参数 `-NoCursorChange` 可关闭并保留系统默认。
 - 系统原生语境切换（输入框 / 可点击元素）仍由 Windows 维护；覆盖层负责蓝框、徽章、光环与点击涟漪。
 - 任务进行中覆盖层不会因空闲消失；本回合结束后约 4 秒自动收工（`-IdleSeconds` 为自身兜底超时）。

@@ -4,7 +4,7 @@ English | [中文](README.md)
 
 > Repo: `dsh-vision-use` (fork of [zzy6-a/vision-use](https://github.com/zzy6-a/vision-use)) · Package: `dsh-vision`
 >
-> Let the DeepSeek Harness agent **actually see your screen and operate the Windows desktop** — with a Codex-style blue overlay (press **Esc** to abort at any time).
+> Let the DeepSeek Harness agent **actually see your screen and operate the Windows desktop** — with a Codex computer-use style red overlay (press **Esc** to abort at any time).
 >
 > This fork fixes two high-DPI problems (display scaling ≠ 100%): **coordinate drift between screenshot and click** and **an overlay that only covers a corner of the screen and looks blurry** — see [DPI and coordinates](#dpi-and-coordinates-read-this-on-high-dpi).
 
@@ -31,17 +31,17 @@ English | [中文](README.md)
 
 ```
 ┌───────────────────────────────────────────────┐
-│  ╔═════════════════════════════════════════╗  │ ← soft blue border (per-pixel alpha)
+│  ╔═════════════════════════════════════════╗  │ ← soft red border (per-pixel alpha)
 │  ║  ● DeepSeek Harness is operating  [Esc]  ║  │ ← top status badge
 │  ║                                         ║  │
-│  ║         typing → blue ring + caret       ║  │
+│  ║         typing → red ring + caret       ║  │
 │  ║         click  → 0.7s ripple (pinned)    ║  │
 │  ║         move   → ring follows; fades 1s  ║  │
 │  ╚═════════════════════════════════════════╝  │
 └───────────────────────────────────────────────┘
 ```
 
-- **One cursor set** (arrow / I-beam / hand) in a unified blue-and-white gradient, while **keeping Windows' native context switching**
+- **One cursor set** (arrow / I-beam / hand) in a unified red-and-white gradient, while **keeping Windows' native context switching**
 - **Overlay always on**: every hands operation (move/click/type/key) is forced to bring up the overlay first — no silent control
 - **Esc abort**: the keypress writes a cancel flag → the overlay exits → every subsequent action is rejected
 - **Task-level keep-alive**: while the agent is still working in this turn (thinking or running other tools), the overlay stays up; it packs up about 4 seconds after the turn ends. The overlay's own idle timeout remains as a fallback (`idle_seconds`, default 30, 0 = disable fallback)
@@ -88,7 +88,7 @@ Windows silently virtualizes any process that has not declared DPI awareness: `S
 | Symptom | Cause |
 |---|---|
 | The agent can only see the top-left corner; anything in the lower right is invisible | Capture was limited to the top-left `1/scale` region (measured: a 3072×1920 screen yielded 1536×960, pixel-identical to the physical top-left corner = pure crop, not a downscale) |
-| The blue frame only surrounds the top-left corner, with thin lines/text | The border bitmap was rendered at logical size, so at 200% scaling it was half the intended visual size |
+| The red frame only surrounds the top-left corner, with thin lines/text | The border bitmap was rendered at logical size, so at 200% scaling it was half the intended visual size |
 | Ring/ripple did not line up with the cursor and looked blurry | Overlay windows/bitmaps were positioned and stretched in the virtualized coordinate space |
 
 How this fork fixes it: `scripts/dpi.ps1` makes **every** desktop-side PowerShell process declare **Per-Monitor-V2 DPI awareness** (falling back through PMv1 / shcore / `SetProcessDPIAware`), so:
@@ -169,7 +169,7 @@ PowerShell children learn the cross-boundary flag directory through the `DSH_VIS
 |---|---|---|
 | `computer_overlay start idle_seconds` | `30` | Overlay idle-timeout fallback; during an active task the plugin keeps refreshing the heartbeat, so it will not vanish while the agent is thinking (0 = disable fallback) |
 | `-MaxSeconds` | `0` | Maximum overlay lifetime (0 = unlimited) |
-| `-NoCursorChange` | off | Do not install the blue cursor set (keep the system default) |
+| `-NoCursorChange` | off | Do not install the red cursor set (keep the system default) |
 
 Privacy note: screenshots enter the current session context as image attachments (equivalent to pasting an image manually).
 

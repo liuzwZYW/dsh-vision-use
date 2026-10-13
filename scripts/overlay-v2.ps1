@@ -53,8 +53,8 @@ static float _scale = 1f;
 static System.Drawing.Bitmap _bmp;
 static System.Drawing.Graphics _g;
 static string _mode = "idle";
-static int _aR = 59, _aG = 130, _aB = 246;
-static int _bR = 147, _bG = 197, _bB = 253;
+static int _aR = 220, _aG = 38, _aB = 38;
+static int _bR = 252, _bG = 165, _bB = 165;
 static int _glow = 150;
 static float _rippleT = 0f;
 static int[] _keyVks = null;
@@ -97,9 +97,9 @@ public static void Init(System.IntPtr hwnd, int size, float scale) {
 }
 public static void SetMode(string m) {
   _mode = m;
-  if (m == "typing") { _aR = 96; _aG = 165; _aB = 250; _bR = 191; _bG = 219; _bB = 254; _glow = 165; }
-  else if (m == "clicking") { _aR = 59; _aG = 130; _aB = 246; _bR = 147; _bG = 197; _bB = 253; _glow = 190; }
-  else { _aR = 59; _aG = 130; _aB = 246; _bR = 147; _bG = 197; _bB = 253; _glow = 150; }
+  if (m == "typing") { _aR = 239; _aG = 68; _aB = 68; _bR = 254; _bG = 202; _bB = 202; _glow = 165; }
+  else if (m == "clicking") { _aR = 185; _aG = 28; _aB = 28; _bR = 252; _bG = 165; _bB = 165; _glow = 190; }
+  else { _aR = 220; _aG = 38; _aB = 38; _bR = 252; _bG = 165; _bB = 165; _glow = 150; }
 }
 public static void Ripple(int x, int y) { _rX = x; _rY = y; _rippleT = 1f; }
 public static void Tick() {
@@ -219,11 +219,11 @@ static void RenderRippleWindow() {
     float r = 14f + 70f * ph;
     int a = (int)(235 * (1f - ph) * (1f - ph));
     if (a <= 1) continue;
-    using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(a, 96, 165, 250), 2.8f - k * 0.5f))
+    using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(a, 239, 68, 68), 2.8f - k * 0.5f))
       _rG.DrawEllipse(pen, c - r, c - r, r * 2, r * 2);
   }
   float fr = 4.0f + 2.8f * _rippleT;
-  using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(230 * _rippleT), 191, 219, 254)))
+  using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(230 * _rippleT), 254, 202, 202)))
     _rG.FillEllipse(b, c - fr, c - fr, fr * 2, fr * 2);
   PushBitmapAt(_rHwnd, _rBmp, _rX - (int)System.Math.Round(_rSize * _rScale / 2f), _rY - (int)System.Math.Round(_rSize * _rScale / 2f));
 }
@@ -244,15 +244,15 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
     int stride = data.Stride;
     byte[] buf = new byte[stride * h];
     float sigma = 30f * scale;                 // 向内衰减宽度（逻辑 30px）
-    float peak = 105f;                         // 贴边处的峰值 alpha
+    float peak = 158f;                         // 贴边处的峰值 alpha（红主题下再加深）
     float inv2s2 = 1f / (2f * sigma * sigma);
     // 直角处两条光带交汇，观感上比直边"瘦"：把角部的有效距离按比例压小，
     // 让角部的等值线向外鼓出（渐变带更宽更浓），四角与四边观感一致。
     float cornerBoost = 0.42f;                 // 角部有效距离压缩比例
     float cornerSigma = 42f * scale;           // 角部影响范围（逻辑 42px）
     float invCorner = 1f / (2f * cornerSigma * cornerSigma);
-    // 起始（贴边）颜色用更深的蓝 / 琥珀：向内由 alpha 衰减自然变浅
-    int cr = cancelled ? 217 : 37, cg = cancelled ? 119 : 99, cb = cancelled ? 6 : 235;
+    // 起始（贴边）颜色：Codex computer-use 风格的红；取消态用琥珀以示区分。向内由 alpha 衰减自然变浅
+    int cr = cancelled ? 245 : 185, cg = cancelled ? 158 : 28, cb = cancelled ? 11 : 28;
     for (int y = 0; y < h; y++) {
       float dy = y + 0.5f; float dy2 = h - (y + 0.5f); if (dy2 < dy) dy = dy2;
       int row = y * stride;
@@ -370,7 +370,7 @@ function Render-Border([int]$w, [int]$h, [bool]$cancelled, [double]$scale = 1.0)
 function Render-Badge([string]$mode, [bool]$cancelled, [string]$fontName, [double]$scale = 1.0) {
   $txt = if ($cancelled) { '已取消' } else { 'DeepSeek Harness 正在操作' }
   $chip = if ($cancelled) { '' } elseif ($mode -eq 'typing') { '输入中' } elseif ($mode -eq 'clicking') { '点击' } elseif ($mode -eq 'moving') { '移动' } else { '' }
-  $accent = if ($cancelled) { (Col 245 158 11 255) } elseif ($mode -eq 'typing') { (Col 34 211 238 255) } elseif ($mode -eq 'clicking') { (Col 251 191 36 255) } else { (Col 96 165 250 255) }
+  $accent = if ($cancelled) { (Col 245 158 11 255) } elseif ($mode -eq 'typing') { (Col 248 113 113 255) } elseif ($mode -eq 'clicking') { (Col 251 146 60 255) } else { (Col 239 68 68 255) }
   $font = New-Object System.Drawing.Font($fontName, 10.5)
   $fontEsc = New-Object System.Drawing.Font('Segoe UI', 8.5)
   $fontChip = New-Object System.Drawing.Font($fontName, 9)
@@ -412,7 +412,7 @@ function Render-Badge([string]$mode, [bool]$cancelled, [string]$fontName, [doubl
     $kp = RoundPath $kx $ky ([int]($wEsc + 18)) $kh 6
     $g.FillPath((New-Object System.Drawing.SolidBrush((Col 255 255 255 24))), $kp)
     $g.DrawPath((New-Object System.Drawing.Pen((Col 255 255 255 65), 1.0)), $kp)
-    $kb = New-Object System.Drawing.SolidBrush((Col 199 210 254 255))
+    $kb = New-Object System.Drawing.SolidBrush((Col 254 202 202 255))
     $g.DrawString('Esc', $fontEsc, $kb, ($kx + 9), ($bh/2 - $fontEsc.GetHeight($g)/2))
     $kb2 = New-Object System.Drawing.SolidBrush((Col 148 163 184 255))
     $g.DrawString('取消', $font, $kb2, ($kx + $wEsc + 27), $ty)
@@ -441,17 +441,17 @@ function New-CuCursor([string]$path, [string]$style, [double]$scale = 1.0) {
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
   $g.ScaleTransform([float]$scale, [float]$scale)
   $g.Clear([System.Drawing.Color]::Transparent)
-  $navy = New-Object System.Drawing.Pen((Col 15 23 42 235), 2.4)
+  $navy = New-Object System.Drawing.Pen((Col 69 10 10 235), 2.4)
   $navy.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
   $hotX = 5; $hotY = 3
   if ($style -eq 'ibeam') {
     $lg = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
       (New-Object System.Drawing.PointF(16, 4)), (New-Object System.Drawing.PointF(32, 44)),
-      (Col 255 255 255 255), (Col 147 197 253 255))
+      (Col 255 255 255 255), (Col 252 165 165 255))
     $g.FillRectangle($lg, 21, 8, 6, 32)
     $g.FillRectangle($lg, 15, 6, 18, 4)
     $g.FillRectangle($lg, 15, 38, 18, 4)
-    $pen = New-Object System.Drawing.Pen((Col 15 23 42 235), 1.8)
+    $pen = New-Object System.Drawing.Pen((Col 69 10 10 235), 1.8)
     $g.DrawRectangle($pen, 21, 8, 6, 32)
     $g.DrawRectangle($pen, 15, 6, 18, 4)
     $g.DrawRectangle($pen, 15, 38, 18, 4)
@@ -461,8 +461,8 @@ function New-CuCursor([string]$path, [string]$style, [double]$scale = 1.0) {
     # 手指光标：圆角造型 + 渐变 + 柔和投影（无生硬方框）
     $lg = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
       (New-Object System.Drawing.PointF(12, 4)), (New-Object System.Drawing.PointF(30, 40)),
-      (Col 255 255 255 255), (Col 147 197 253 255))
-    $shadow = New-Object System.Drawing.SolidBrush((Col 15 23 42 55))
+      (Col 255 255 255 255), (Col 252 165 165 255))
+    $shadow = New-Object System.Drawing.SolidBrush((Col 69 10 10 55))
     $finger = RoundPath 10.5 4.5 8 21 4
     $palm   = RoundPath 9.5 22.5 25 15 6.5
     $thumb  = RoundPath 28.5 17.5 8 13 4
@@ -476,7 +476,7 @@ function New-CuCursor([string]$path, [string]$style, [double]$scale = 1.0) {
     $g.FillPath($lg, $palm)
     $g.FillPath($lg, $thumb)
     $sh1.Dispose(); $sh2.Dispose(); $sh3.Dispose()
-    $pen = New-Object System.Drawing.Pen((Col 15 23 42 210), 1.7)
+    $pen = New-Object System.Drawing.Pen((Col 69 10 10 210), 1.7)
     $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
     $g.DrawPath($pen, $finger); $g.DrawPath($pen, $palm); $g.DrawPath($pen, $thumb)
     $hl = New-Object System.Drawing.Pen((Col 255 255 255 120), 1.0)
@@ -494,10 +494,10 @@ function New-CuCursor([string]$path, [string]$style, [double]$scale = 1.0) {
       (New-Object System.Drawing.PointF(31, 26))
     )
     [System.Drawing.PointF[]]$shadowPts = @($pts | ForEach-Object { New-Object System.Drawing.PointF(($_.X + 1.4), ($_.Y + 1.6)) })
-    $g.FillPolygon((New-Object System.Drawing.SolidBrush((Col 15 23 42 60))), $shadowPts)
+    $g.FillPolygon((New-Object System.Drawing.SolidBrush((Col 69 10 10 60))), $shadowPts)
     $lg = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
       (New-Object System.Drawing.PointF(6, 4)), (New-Object System.Drawing.PointF(28, 42)),
-      (Col 255 255 255 255), (Col 147 197 253 255))
+      (Col 255 255 255 255), (Col 252 165 165 255))
     $g.FillPolygon($lg, $pts)
     $g.DrawPolygon($navy, $pts)
     $lg.Dispose()
