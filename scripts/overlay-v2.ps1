@@ -3,7 +3,7 @@
   [int]$MaxSeconds = 0,
   [int]$IdleSeconds = 30,
   [switch]$NoCursorChange,
-  [int]$HaloSize = 280,
+  [int]$HaloSize = 140,
   [int]$IntervalMs = 16
 )
 $ErrorActionPreference = 'Stop'
@@ -68,7 +68,7 @@ static bool _visInit = false;
 static System.IntPtr _rHwnd = System.IntPtr.Zero;
 static System.Drawing.Bitmap _rBmp;
 static System.Drawing.Graphics _rG;
-static int _rSize = 240;
+static int _rSize = 120;
 static float _rScale = 1f;
 static int _rX = 0, _rY = 0;
 static bool _rShown = false;
@@ -153,15 +153,15 @@ public static void Tick() {
     }
   }
   float pulse = (float)((System.Math.Sin(now * 0.0047) + 1.0) / 2.0);
-  float rr = 15f + pulse * 1.6f;
+  float rr = 7.5f + pulse * 0.8f;
   using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb((int)(215 * _vis), _bR, _bG, _bB), 2.0f))
     _g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2);
   if (_mode == "typing") {
     using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb((int)(240 * _vis), 255, 255, 255), 2.0f))
-      _g.DrawLine(pen, cx, cy - 7f, cx, cy + 7f);
+      _g.DrawLine(pen, cx, cy - 3.5f, cx, cy + 3.5f);
   } else {
     using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(242 * _vis), 255, 255, 255)))
-      _g.FillEllipse(b, cx - 2.8f, cy - 2.8f, 5.6f, 5.6f);
+      _g.FillEllipse(b, cx - 1.4f, cy - 1.4f, 2.8f, 2.8f);
   }
   PushFrame(p.X - (int)System.Math.Round(_size * _scale / 2f), p.Y - (int)System.Math.Round(_size * _scale / 2f));
 }
@@ -216,13 +216,13 @@ static void RenderRippleWindow() {
     float ph = e - k * 0.16f;
     if (ph <= 0f) continue;
     if (ph > 1f) ph = 1f;
-    float r = 14f + 70f * ph;
+    float r = 7f + 35f * ph;
     int a = (int)(235 * (1f - ph) * (1f - ph));
     if (a <= 1) continue;
-    using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(a, 239, 68, 68), 2.8f - k * 0.5f))
+    using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(a, 239, 68, 68), 1.4f - k * 0.25f))
       _rG.DrawEllipse(pen, c - r, c - r, r * 2, r * 2);
   }
-  float fr = 4.0f + 2.8f * _rippleT;
+  float fr = 2.0f + 1.4f * _rippleT;
   using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(230 * _rippleT), 254, 202, 202)))
     _rG.FillEllipse(b, c - fr, c - fr, fr * 2, fr * 2);
   PushBitmapAt(_rHwnd, _rBmp, _rX - (int)System.Math.Round(_rSize * _rScale / 2f), _rY - (int)System.Math.Round(_rSize * _rScale / 2f));
@@ -243,13 +243,13 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
   try {
     int stride = data.Stride;
     byte[] buf = new byte[stride * h];
-    float sigma = 30f * scale;                 // 向内衰减宽度（逻辑 30px）
+    float sigma = 15f * scale;                 // 向内衰减宽度（逻辑 15px，已减半）
     float peak = 158f;                         // 贴边处的峰值 alpha（红主题下再加深）
     float inv2s2 = 1f / (2f * sigma * sigma);
     // 直角处两条光带交汇，观感上比直边"瘦"：把角部的有效距离按比例压小，
     // 让角部的等值线向外鼓出（渐变带更宽更浓），四角与四边观感一致。
     float cornerBoost = 0.42f;                 // 角部有效距离压缩比例
-    float cornerSigma = 42f * scale;           // 角部影响范围（逻辑 42px）
+    float cornerSigma = 21f * scale;           // 角部影响范围（逻辑 21px，随带宽减半）
     float invCorner = 1f / (2f * cornerSigma * cornerSigma);
     // 起始（贴边）颜色：Codex computer-use 风格的红；取消态用琥珀以示区分。向内由 alpha 衰减自然变浅
     int cr = cancelled ? 245 : 185, cg = cancelled ? 158 : 28, cb = cancelled ? 11 : 28;
@@ -552,7 +552,7 @@ $borderForm = MakeWindow $vs.X $vs.Y $vs.Width $vs.Height
 $badgeBmp = Render-Badge 'idle' $false $fontName $sc
 $badgeForm = MakeWindow ([int](($vs.Width - $badgeBmp.Width) / 2 + $vs.X)) $badgeTop $badgeBmp.Width $badgeBmp.Height
 $haloSizePx = [int][Math]::Ceiling($HaloSize * $sc)
-$rippleSizePx = [int][Math]::Ceiling(240 * $sc)
+$rippleSizePx = [int][Math]::Ceiling(120 * $sc)
 $haloForm = MakeWindow 0 0 $haloSizePx $haloSizePx
 $rippleForm = MakeWindow 0 0 $rippleSizePx $rippleSizePx
 $rippleForm.Hide()
@@ -564,7 +564,7 @@ Push-Bitmap $badgeForm $badgeBmp ([int](($vs.Width - $badgeBmp.Width) / 2 + $vs.
 $renderSw.Stop()
 BootLog ('C# engine ready screen=' + $vs.Width + 'x' + $vs.Height + ' scale=' + $sc + ' frame=' + $renderSw.ElapsedMilliseconds + 'ms')
 [CU.Eng]::Init($haloForm.Handle, $HaloSize, [float]$sc)
-[CU.Eng]::InitRipple($rippleForm.Handle, 240, [float]$sc)
+[CU.Eng]::InitRipple($rippleForm.Handle, 120, [float]$sc)
 
 $script:cancelled = $false
 $script:lastMode = 'idle'
