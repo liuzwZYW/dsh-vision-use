@@ -1,4 +1,4 @@
-﻿param(
+param(
   [ValidateSet('start','stop','status')][string]$Action = 'start',
   [int]$MaxSeconds = 0,
   [int]$IdleSeconds = 30,
@@ -50,7 +50,7 @@ static System.Drawing.Graphics _g;
 static string _mode = "idle";
 static int _aR = 59, _aG = 130, _aB = 246;
 static int _bR = 147, _bG = 197, _bB = 253;
-static int _glow = 85;
+static int _glow = 150;
 static float _rippleT = 0f;
 static int[] _keyVks = null;
 static int _modeUntil = 0;
@@ -69,6 +69,13 @@ static int _rX = 0, _rY = 0;
 static bool _rShown = false;
 static bool _hwndShown = true;
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int n);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr h, System.IntPtr after, int x, int y, int cx, int cy, uint flags);
+// 把覆盖层窗口重新提到最前：用户可能开着 Always-on-Top 的应用（实测 VS Code 置顶会把整条边框盖掉，
+// 徽章因为状态变化时会被重绘才幸存）。SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE，不抢焦点。
+public static void Raise(System.IntPtr h) {
+  if (h == System.IntPtr.Zero) return;
+  SetWindowPos(h, new System.IntPtr(-1), 0, 0, 0, 0, 0x0002u | 0x0001u | 0x0010u);
+}
 
 public static void Init(System.IntPtr hwnd, int size, float scale) {
   _hwnd = hwnd; _size = size;
@@ -85,9 +92,9 @@ public static void Init(System.IntPtr hwnd, int size, float scale) {
 }
 public static void SetMode(string m) {
   _mode = m;
-  if (m == "typing") { _aR = 96; _aG = 165; _aB = 250; _bR = 191; _bG = 219; _bB = 254; _glow = 96; }
-  else if (m == "clicking") { _aR = 59; _aG = 130; _aB = 246; _bR = 147; _bG = 197; _bB = 253; _glow = 118; }
-  else { _aR = 59; _aG = 130; _aB = 246; _bR = 147; _bG = 197; _bB = 253; _glow = 85; }
+  if (m == "typing") { _aR = 96; _aG = 165; _aB = 250; _bR = 191; _bG = 219; _bB = 254; _glow = 165; }
+  else if (m == "clicking") { _aR = 59; _aG = 130; _aB = 246; _bR = 147; _bG = 197; _bB = 253; _glow = 190; }
+  else { _aR = 59; _aG = 130; _aB = 246; _bR = 147; _bG = 197; _bB = 253; _glow = 150; }
 }
 public static void Ripple(int x, int y) { _rX = x; _rY = y; _rippleT = 1f; }
 public static void Tick() {
@@ -204,14 +211,14 @@ static void RenderRippleWindow() {
     float ph = e - k * 0.16f;
     if (ph <= 0f) continue;
     if (ph > 1f) ph = 1f;
-    float r = 12f + 62f * ph;
-    int a = (int)(205 * (1f - ph) * (1f - ph));
+    float r = 14f + 70f * ph;
+    int a = (int)(235 * (1f - ph) * (1f - ph));
     if (a <= 1) continue;
-    using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(a, 96, 165, 250), 2.4f - k * 0.5f))
+    using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(a, 96, 165, 250), 2.8f - k * 0.5f))
       _rG.DrawEllipse(pen, c - r, c - r, r * 2, r * 2);
   }
-  float fr = 3.5f + 2.5f * _rippleT;
-  using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(200 * _rippleT), 191, 219, 254)))
+  float fr = 4.0f + 2.8f * _rippleT;
+  using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(230 * _rippleT), 191, 219, 254)))
     _rG.FillEllipse(b, c - fr, c - fr, fr * 2, fr * 2);
   PushBitmapAt(_rHwnd, _rBmp, _rX - (int)System.Math.Round(_rSize * _rScale / 2f), _rY - (int)System.Math.Round(_rSize * _rScale / 2f));
 }
@@ -283,17 +290,20 @@ function Render-Border([int]$w, [int]$h, [bool]$cancelled, [double]$scale = 1.0)
   $g.Clear([System.Drawing.Color]::Transparent)
   $main = if ($cancelled) { @(245,158,11) } else { @(59,130,246) }
   $bright = if ($cancelled) { @(253,186,116) } else { @(147,197,253) }
+  # 柔光渐变：初始不透明度提高（更"重"）、衰减更缓。坐标全是逻辑像素，
+  # 由 New-DrawSurface 的 ScaleTransform 按 DPI 放大（200% 下 1 逻辑 = 2 物理）。
   for ($i = 0; $i -lt 84; $i++) {
-    $alpha = [int](38 * [Math]::Exp(-[Math]::Pow($i / 26.0, 2)))
+    $alpha = [int](76 * [Math]::Exp(-[Math]::Pow($i / 30.0, 2)))
     if ($alpha -le 0) { continue }
     $ins = 9 + $i
-    $pen = New-Object System.Drawing.Pen((Col $main[0] $main[1] $main[2] $alpha), 1.0)
+    # 笔宽 2.0 > 每层内缩 1.0：让相邻层互相覆盖，否则浓度一高就看出 84 条线之间的条纹
+    $pen = New-Object System.Drawing.Pen((Col $main[0] $main[1] $main[2] $alpha), 2.0)
     $g.DrawPath($pen, (RoundPath $ins $ins ($w - 2*$ins) ($h - 2*$ins) (30 + $i * 0.15)))
     $pen.Dispose()
   }
-  $penA = New-Object System.Drawing.Pen((Col $bright[0] $bright[1] $bright[2] 235), 2.2)
+  $penA = New-Object System.Drawing.Pen((Col $bright[0] $bright[1] $bright[2] 245), 3.0)
   $g.DrawPath($penA, (RoundPath 8 8 ($w - 16) ($h - 16) 30)); $penA.Dispose()
-  $penB = New-Object System.Drawing.Pen((Col $main[0] $main[1] $main[2] 110), 1.0)
+  $penB = New-Object System.Drawing.Pen((Col $main[0] $main[1] $main[2] 140), 1.4)
   $g.DrawPath($penB, (RoundPath 3 3 ($w - 6) ($h - 6) 32)); $penB.Dispose()
   $g.Dispose(); return $bmp
 }
@@ -505,6 +515,11 @@ $tick.Add_Tick({
   if ($script:cancelled) { return }
   [CU.Eng]::Tick()
   $script:n++
+  if (($script:n % 30) -eq 0) {
+    # 防遮挡：用户可能开着 Always-on-Top 的应用（实测 VS Code 置顶会把边框整条盖掉）
+    [CU.Eng]::Raise($borderForm.Handle)
+    [CU.Eng]::Raise($badgeForm.Handle)
+  }
   if (($script:n % 6) -eq 0) {
     $m = [CU.Eng]::GetMode()
     if ($m -ne $script:lastMode) {
