@@ -12,6 +12,14 @@ $BOOTLOG = Join-Path $FlagDir 'ov_boot.log'
 function BootLog([string]$m) { try { Add-Content -LiteralPath $BOOTLOG -Value ((Get-Date).ToString('HH:mm:ss') + ' ' + $m) -ErrorAction SilentlyContinue } catch {} }
 BootLog ("boot action=" + $Action)
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { BootLog ("console-encoding-skip: " + $_.Exception.Message) }
+# ---- DPI：覆盖层按物理像素 1:1 绘制（必须在加载 WinForms / 建任何窗口之前）----
+# 未声明 DPI 感知时：VirtualScreen 只有物理屏的左上 1/scale，边框只铺满那一小块，
+# 线条/字号又按 96dpi 画，合成时被系统拉伸 → 又偏又糊。这里统一到物理像素。
+. (Join-Path $PSScriptRoot 'dpi.ps1')
+Enable-DshDpi | Out-Null
+$DpiScale = Get-DshDpiScale
+if ($DpiScale -le 0) { $DpiScale = 1.0 }
+BootLog ("dpi scale=" + $DpiScale + " awareness=" + (Get-DshDpiAwareness))
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 # ================= C# 动画引擎（热路径全在编译代码里，PowerShell 只敲节拍）=================
@@ -36,6 +44,7 @@ public struct BLENDFUNCTION { public byte BlendOp; public byte BlendFlags; publi
 
 static System.IntPtr _hwnd = System.IntPtr.Zero;
 static int _size = 220;
+static float _scale = 1f;
 static System.Drawing.Bitmap _bmp;
 static System.Drawing.Graphics _g;
 static string _mode = "idle";
@@ -55,17 +64,21 @@ static System.IntPtr _rHwnd = System.IntPtr.Zero;
 static System.Drawing.Bitmap _rBmp;
 static System.Drawing.Graphics _rG;
 static int _rSize = 240;
+static float _rScale = 1f;
 static int _rX = 0, _rY = 0;
 static bool _rShown = false;
 static bool _hwndShown = true;
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int n);
 
-public static void Init(System.IntPtr hwnd, int size) {
+public static void Init(System.IntPtr hwnd, int size, float scale) {
   _hwnd = hwnd; _size = size;
-  _bmp = new System.Drawing.Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+  _scale = (scale <= 0f) ? 1f : scale;
+  // 位图按物理像素分配，绘制沿用 96dpi 逻辑坐标并由变换放大 —— 与 DPI 一致且不发虚
+  int px = (int)System.Math.Ceiling(size * _scale);
+  _bmp = new System.Drawing.Bitmap(px, px, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
   _g = System.Drawing.Graphics.FromImage(_bmp);
   _g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-  float cx = _size / 2f, cy = _size / 2f;
+  _g.ScaleTransform(_scale, _scale);
   _g.Clear(System.Drawing.Color.Transparent);
   SetMode("idle");
 }
@@ -137,14 +150,14 @@ public static void Tick() {
     using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(242 * _vis), 255, 255, 255)))
       _g.FillEllipse(b, cx - 2.8f, cy - 2.8f, 5.6f, 5.6f);
   }
-  PushFrame(p.X - _size / 2, p.Y - _size / 2);
+  PushFrame(p.X - (int)System.Math.Round(_size * _scale / 2f), p.Y - (int)System.Math.Round(_size * _scale / 2f));
 }
 static void PushFrame(int x, int y) {
   System.IntPtr sdc = GetDC(System.IntPtr.Zero);
   System.IntPtr mdc = CreateCompatibleDC(sdc);
   System.IntPtr hb = _bmp.GetHbitmap(System.Drawing.Color.FromArgb(0));
   System.IntPtr ob = SelectObject(mdc, hb);
-  SIZE sz = new SIZE(); sz.cx = _size; sz.cy = _size;
+  SIZE sz = new SIZE(); sz.cx = _bmp.Width; sz.cy = _bmp.Height;
   POINT src = new POINT(); src.X = 0; src.Y = 0;
   POINT dst = new POINT(); dst.X = x; dst.Y = y;
   BLENDFUNCTION bf = new BLENDFUNCTION(); bf.BlendOp = 0; bf.BlendFlags = 0; bf.SourceConstantAlpha = 255; bf.AlphaFormat = 1;
@@ -166,11 +179,14 @@ public static bool PushRaw(System.IntPtr hwnd, System.IntPtr hb, int w, int h, i
   SelectObject(mdc, ob); DeleteDC(mdc); ReleaseDC(System.IntPtr.Zero, sdc);
   return ok;
 }
-public static void InitRipple(System.IntPtr hwnd, int size) {
+public static void InitRipple(System.IntPtr hwnd, int size, float scale) {
   _rHwnd = hwnd; _rSize = size;
-  _rBmp = new System.Drawing.Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+  _rScale = (scale <= 0f) ? 1f : scale;
+  int px = (int)System.Math.Ceiling(size * _rScale);
+  _rBmp = new System.Drawing.Bitmap(px, px, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
   _rG = System.Drawing.Graphics.FromImage(_rBmp);
   _rG.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+  _rG.ScaleTransform(_rScale, _rScale);
 }
 static void PushBitmapAt(System.IntPtr hwnd, System.Drawing.Bitmap bmp, int x, int y) {
   System.IntPtr hb = bmp.GetHbitmap(System.Drawing.Color.FromArgb(0));
@@ -195,7 +211,7 @@ static void RenderRippleWindow() {
   float fr = 3.5f + 2.5f * _rippleT;
   using (var b = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb((int)(200 * _rippleT), 191, 219, 254)))
     _rG.FillEllipse(b, c - fr, c - fr, fr * 2, fr * 2);
-  PushBitmapAt(_rHwnd, _rBmp, _rX - _rSize / 2, _rY - _rSize / 2);
+  PushBitmapAt(_rHwnd, _rBmp, _rX - (int)System.Math.Round(_rSize * _rScale / 2f), _rY - (int)System.Math.Round(_rSize * _rScale / 2f));
 }
 public static string GetMode() { return _autoMode; }
 public static int EscDown() { return (GetAsyncKeyState(0x1B) & 0x8000) != 0 ? 1 : 0; }
@@ -219,6 +235,7 @@ if ($Action -eq 'stop') { SetFlag 'stop' 'by-stop'; Start-Sleep -Milliseconds 90
 function MakeWindow([int]$x, [int]$y, [int]$w, [int]$h) {
   $f = New-Object System.Windows.Forms.Form
   $f.FormBorderStyle = 'None'; $f.ShowInTaskbar = $false; $f.StartPosition = 'Manual'
+  $f.AutoScaleMode = 'None'   # 尺寸全部由我们按物理像素给定，禁止 WinForms 再缩一次
   $f.Bounds = New-Object System.Drawing.Rectangle($x, $y, $w, $h)
   $f.TopMost = $true
   $null = $f.Handle
@@ -226,6 +243,21 @@ function MakeWindow([int]$x, [int]$y, [int]$w, [int]$h) {
   [CU.Eng]::SetWindowLongSafe($f.Handle, $ex) | Out-Null
   $f.Show()
   return $f
+}
+
+# ---- 绘制面板：位图按物理像素分配，坐标系保持 96dpi 逻辑尺寸（由 ScaleTransform 放大）----
+# 这样既不用把满屏的尺寸常量都乘一遍 scale，又保证线条/字体是按物理分辨率矢量渲染的，
+# 而不是画在低分辨率位图上再被系统拉伸（后者就是覆盖层发虚的原因）。
+function New-DrawSurface([int]$logicalW, [int]$logicalH, [double]$scale) {
+  if ($scale -le 0) { $scale = 1.0 }
+  $pw = [int][Math]::Ceiling($logicalW * $scale)
+  $ph = [int][Math]::Ceiling($logicalH * $scale)
+  if ($pw -lt 1) { $pw = 1 }
+  if ($ph -lt 1) { $ph = 1 }
+  $bmp = New-Object System.Drawing.Bitmap($pw, $ph, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.ScaleTransform([float]$scale, [float]$scale)
+  return @{ Bmp = $bmp; G = $g }
 }
 
 # ---- 边框（静态渲染一次）----
@@ -237,9 +269,9 @@ function RoundPath([double]$x, [double]$y, [double]$w, [double]$h, [double]$r) {
   $p.AddArc($x + $w - $d, $y + $h - $d, $d, $d, 0, 90); $p.AddArc($x, $y + $h - $d, $d, $d, 90, 90)
   $p.CloseFigure(); return $p
 }
-function Render-Border([int]$w, [int]$h, [bool]$cancelled) {
-  $bmp = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
+function Render-Border([int]$w, [int]$h, [bool]$cancelled, [double]$scale = 1.0) {
+  $surf = New-DrawSurface $w $h $scale
+  $bmp = $surf.Bmp; $g = $surf.G
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
   $g.Clear([System.Drawing.Color]::Transparent)
   $main = if ($cancelled) { @(245,158,11) } else { @(59,130,246) }
@@ -259,7 +291,7 @@ function Render-Border([int]$w, [int]$h, [bool]$cancelled) {
   $g.Dispose(); return $bmp
 }
 # ---- 徽章（按模式渲染，切换时才重画）----
-function Render-Badge([string]$mode, [bool]$cancelled, [string]$fontName) {
+function Render-Badge([string]$mode, [bool]$cancelled, [string]$fontName, [double]$scale = 1.0) {
   $txt = if ($cancelled) { '已取消' } else { 'DeepSeek Harness 正在操作' }
   $chip = if ($cancelled) { '' } elseif ($mode -eq 'typing') { '输入中' } elseif ($mode -eq 'clicking') { '点击' } elseif ($mode -eq 'moving') { '移动' } else { '' }
   $accent = if ($cancelled) { (Col 245 158 11 255) } elseif ($mode -eq 'typing') { (Col 34 211 238 255) } elseif ($mode -eq 'clicking') { (Col 251 191 36 255) } else { (Col 96 165 250 255) }
@@ -273,8 +305,8 @@ function Render-Badge([string]$mode, [bool]$cancelled, [string]$fontName) {
   $wCancel = if (-not $cancelled) { $mg.MeasureString('取消', $font).Width } else { 0 }
   $bw = [int](16 + 9 + 11 + $wText + 18 + $wChip + $(if (-not $cancelled) { 10 + ($wEsc + 18) + 9 + $wCancel } else { 0 }) + 18)
   $bh = 40
-  $bmp = New-Object System.Drawing.Bitmap($bw, $bh, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $surf = New-DrawSurface $bw $bh $scale
+  $bmp = $surf.Bmp; $g = $surf.G
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
   $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
   $path = RoundPath 1 1 ($bw - 2) ($bh - 2) 19
@@ -323,11 +355,15 @@ function Push-Bitmap($form, $bmp, [int]$x, [int]$y) {
 # ---------------- 自定义系统光标 ----------------
 
 # ---------------- 蓝色风格光标套装（箭头/I形/手指）----------------
-function New-CuCursor([string]$path, [string]$style) {
-  $S = 48
-  $bmp = New-Object System.Drawing.Bitmap($S, $S, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+function New-CuCursor([string]$path, [string]$style, [double]$scale = 1.0) {
+  $S = 48                                            # 逻辑设计尺寸（96dpi）
+  if ($scale -le 0) { $scale = 1.0 }
+  $Sp = [int][Math]::Ceiling($S * $scale)            # 真正写进 .cur 的物理像素尺寸
+  if ($Sp -gt 256) { $Sp = 256 }                     # ICO/CUR 单边上限（256 以 0 编码）
+  $bmp = New-Object System.Drawing.Bitmap($Sp, $Sp, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $g.ScaleTransform([float]$scale, [float]$scale)
   $g.Clear([System.Drawing.Color]::Transparent)
   $navy = New-Object System.Drawing.Pen((Col 15 23 42 235), 2.4)
   $navy.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
@@ -393,14 +429,14 @@ function New-CuCursor([string]$path, [string]$style) {
   $ms = New-Object System.IO.MemoryStream
   $bw = New-Object System.IO.BinaryWriter($ms)
   $bw.Write([UInt16]0); $bw.Write([UInt16]2); $bw.Write([UInt16]1)
-  $xor = $S * $S * 4; $and = [int]($S * $S / 8); $data = 40 + $xor + $and
-  $bw.Write([Byte]$S); $bw.Write([Byte]$S); $bw.Write([Byte]0); $bw.Write([Byte]0)
-  $bw.Write([UInt16]$hotX); $bw.Write([UInt16]$hotY)
+  $xor = $Sp * $Sp * 4; $and = [int]($Sp * $Sp / 8); $data = 40 + $xor + $and
+  $bw.Write([Byte]($Sp % 256)); $bw.Write([Byte]($Sp % 256)); $bw.Write([Byte]0); $bw.Write([Byte]0)
+  $bw.Write([UInt16]([int][Math]::Round($hotX * $scale))); $bw.Write([UInt16]([int][Math]::Round($hotY * $scale)))
   $bw.Write([UInt32]$data); $bw.Write([UInt32]22)
-  $bw.Write([UInt32]40); $bw.Write([Int32]$S); $bw.Write([Int32]($S * 2))
+  $bw.Write([UInt32]40); $bw.Write([Int32]$Sp); $bw.Write([Int32]($Sp * 2))
   $bw.Write([UInt16]1); $bw.Write([UInt16]32); $bw.Write([UInt32]0)
   $bw.Write([UInt32]$xor); $bw.Write([Int32]0); $bw.Write([Int32]0); $bw.Write([UInt32]0); $bw.Write([UInt32]0)
-  for ($y = $S - 1; $y -ge 0; $y--) { for ($x = 0; $x -lt $S; $x++) { $c = $bmp.GetPixel($x, $y); $bw.Write([Byte]$c.B); $bw.Write([Byte]$c.G); $bw.Write([Byte]$c.R); $bw.Write([Byte]$c.A) } }
+  for ($y = $Sp - 1; $y -ge 0; $y--) { for ($x = 0; $x -lt $Sp; $x++) { $c = $bmp.GetPixel($x, $y); $bw.Write([Byte]$c.B); $bw.Write([Byte]$c.G); $bw.Write([Byte]$c.R); $bw.Write([Byte]$c.A) } }
   $z = New-Object byte[] $and; $bw.Write($z, 0, $and); $bw.Flush()
   [System.IO.File]::WriteAllBytes($path, $ms.ToArray())
   $bw.Dispose(); $ms.Dispose(); $bmp.Dispose()
@@ -419,7 +455,7 @@ if (-not $NoCursorChange) {
       @{ style = 'hand';  id = 32649; file = (Join-Path $env:TEMP 'dsh_cu_hand.cur') }
     )
     foreach ($m in $map) {
-      New-CuCursor $m.file $m.style
+      New-CuCursor $m.file $m.style $DpiScale
       $hc = [CU.Eng]::LoadCursorFromFile($m.file)
       if ($hc -ne [System.IntPtr]::Zero) { [CU.Eng]::SetSystemCursor($hc, [uint32]$m.id) | Out-Null; BootLog ("cursor installed " + $m.style) }
     }
@@ -427,21 +463,28 @@ if (-not $NoCursorChange) {
 }
 
 $fontName = 'Microsoft YaHei UI'
-$vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+$vs = [System.Windows.Forms.SystemInformation]::VirtualScreen   # DPI 感知后 = 真实物理分辨率
+$sc = $DpiScale
+$badgeTop = [int]($vs.Y + 16 * $sc)
+# Render-Border 接受逻辑尺寸（内部再乘 scale 得到物理位图），这里先换算回逻辑尺寸
+$vsLogW = [int][Math]::Ceiling($vs.Width / $sc)
+$vsLogH = [int][Math]::Ceiling($vs.Height / $sc)
 
 $borderForm = MakeWindow $vs.X $vs.Y $vs.Width $vs.Height
-$badgeBmp = Render-Badge 'idle' $false $fontName
-$badgeForm = MakeWindow ([int](($vs.Width - $badgeBmp.Width) / 2 + $vs.X)) ($vs.Y + 16) $badgeBmp.Width $badgeBmp.Height
-$haloForm = MakeWindow 0 0 $HaloSize $HaloSize
-$rippleForm = MakeWindow 0 0 240 240
+$badgeBmp = Render-Badge 'idle' $false $fontName $sc
+$badgeForm = MakeWindow ([int](($vs.Width - $badgeBmp.Width) / 2 + $vs.X)) $badgeTop $badgeBmp.Width $badgeBmp.Height
+$haloSizePx = [int][Math]::Ceiling($HaloSize * $sc)
+$rippleSizePx = [int][Math]::Ceiling(240 * $sc)
+$haloForm = MakeWindow 0 0 $haloSizePx $haloSizePx
+$rippleForm = MakeWindow 0 0 $rippleSizePx $rippleSizePx
 $rippleForm.Hide()
 
-$borderBmp = Render-Border $vs.Width $vs.Height $false
+$borderBmp = Render-Border $vsLogW $vsLogH $false $sc
 Push-Bitmap $borderForm $borderBmp $vs.X $vs.Y
-Push-Bitmap $badgeForm $badgeBmp ([int](($vs.Width - $badgeBmp.Width) / 2 + $vs.X)) ($vs.Y + 16)
-BootLog 'C# engine ready'
-[CU.Eng]::Init($haloForm.Handle, $HaloSize)
-[CU.Eng]::InitRipple($rippleForm.Handle, 240)
+Push-Bitmap $badgeForm $badgeBmp ([int](($vs.Width - $badgeBmp.Width) / 2 + $vs.X)) $badgeTop
+BootLog ('C# engine ready screen=' + $vs.Width + 'x' + $vs.Height + ' scale=' + $sc)
+[CU.Eng]::Init($haloForm.Handle, $HaloSize, [float]$sc)
+[CU.Eng]::InitRipple($rippleForm.Handle, 240, [float]$sc)
 
 $script:cancelled = $false
 $script:lastMode = 'idle'
@@ -459,8 +502,8 @@ $tick.Add_Tick({
     $m = [CU.Eng]::GetMode()
     if ($m -ne $script:lastMode) {
       $script:lastMode = $m
-      $nb = Render-Badge $m $false $fontName
-      Push-Bitmap $badgeForm $nb ([int](($vs.Width - $nb.Width) / 2 + $vs.X)) ($vs.Y + 16)
+      $nb = Render-Badge $m $false $fontName $sc
+      Push-Bitmap $badgeForm $nb ([int](($vs.Width - $nb.Width) / 2 + $vs.X)) $badgeTop
       $nb.Dispose()
     }
   }
@@ -468,10 +511,10 @@ $tick.Add_Tick({
     if ([CU.Eng]::EscDown() -eq 1) {
       $script:cancelled = $true
       SetFlag 'cancel' 'esc'
-      $cb = Render-Border $vs.Width $vs.Height $true
+      $cb = Render-Border $vsLogW $vsLogH $true $sc
       Push-Bitmap $borderForm $cb $vs.X $vs.Y; $cb.Dispose()
-      $cbb = Render-Badge 'idle' $true $fontName
-      Push-Bitmap $badgeForm $cbb ([int](($vs.Width - $cbb.Width) / 2 + $vs.X)) ($vs.Y + 16); $cbb.Dispose()
+      $cbb = Render-Badge 'idle' $true $fontName $sc
+      Push-Bitmap $badgeForm $cbb ([int](($vs.Width - $cbb.Width) / 2 + $vs.X)) $badgeTop; $cbb.Dispose()
       $haloForm.Hide()
       Start-Sleep -Milliseconds 2200
       [System.Windows.Forms.Application]::Exit()

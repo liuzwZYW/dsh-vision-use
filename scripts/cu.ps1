@@ -11,6 +11,9 @@
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+# ---- DPI：截图 / 光标 / 覆盖层统一为物理像素（必须在加载 WinForms 之前）----
+. (Join-Path $PSScriptRoot 'dpi.ps1')
+Enable-DshDpi | Out-Null
 # ---- flag 目录：由插件通过 DSH_VISION_FLAG_DIR 传入（Windows 原生 = %TEMP%，WSL = \\wsl.localhost\<distro>\tmp）----
 $FlagDir = if ($env:DSH_VISION_FLAG_DIR) { $env:DSH_VISION_FLAG_DIR } else { $env:TEMP }
 # ---- ESC cancel guard: 用户在覆盖层按 Esc 后，所有动作拒动 ----
@@ -105,6 +108,13 @@ function Save-Shot([string]$path) {
 }
 switch ($Action) {
   'pos'   { $p = Get-Pos; Write-Output ("POS " + $p.X + "," + $p.Y) }
+  'screen' {
+    # 诊断用：DPI 感知后这里就是真实物理分辨率，与截图 / 点击坐标同一套
+    $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $sc = Get-DshDpiScale
+    $dpi = [int][Math]::Round(96 * $sc)
+    Write-Output ("SCREEN " + $vs.Width + "x" + $vs.Height + " ORIGIN " + $vs.X + "," + $vs.Y + " DPI " + $dpi + " SCALE " + $sc)
+  }
   'fg'    { $h = [CU.W]::GetForegroundWindow(); $pid2 = 0; [CU.W]::GetWindowThreadProcessId($h, [ref]$pid2) | Out-Null; $pr = Get-Process -Id $pid2 -ErrorAction SilentlyContinue; Write-Output ("FG pid=" + $pid2 + " name=" + $pr.ProcessName + " title=" + $pr.MainWindowTitle) }
   'move'  { Set-CuState 'moving'; Move-Smooth $X $Y $Steps $DelayMs; $p = Get-Pos; Set-CuState 'idle'; Write-Output ("POS " + $p.X + "," + $p.Y) }
   'click' { if ($X -ge 0) { Move-Smooth $X $Y $Steps $DelayMs }; $pp = Get-Pos; Set-CuState 'clicking' $pp.X $pp.Y; [CU.W]::mouse_event(0x0002,0,0,0,[System.UIntPtr]::Zero); Start-Sleep -Milliseconds 35; [CU.W]::mouse_event(0x0004,0,0,0,[System.UIntPtr]::Zero); Start-Sleep -Milliseconds 120; Set-CuState 'idle'; Write-Output 'CLICK' }

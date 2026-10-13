@@ -5,6 +5,9 @@
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+# ---- DPI：截屏与返回的 BOX 坐标统一为物理像素（必须在加载 WinForms 之前）----
+. (Join-Path $PSScriptRoot 'dpi.ps1')
+Enable-DshDpi | Out-Null
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
 [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime] | Out-Null
 [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null

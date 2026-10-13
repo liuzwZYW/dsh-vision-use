@@ -2,11 +2,13 @@
 
 [English](README_EN.md) | 中文
 
-> 仓库：`vision-use` · 包名：`dsh-vision`
+> 仓库：`dsh-vision-use`（fork 自 [zzy6-a/vision-use](https://github.com/zzy6-a/vision-use)）· 包名：`dsh-vision`
 >
 > 让 DeepSeek Harness 的 Agent **真正看见你的屏幕、并动手操作 Windows 桌面** —— 带 Codex 风格的蓝色操作覆盖层（按 **Esc** 随时中止）。
+>
+> 本 fork 修复了高 DPI（系统缩放 ≠ 100%）下的两个问题：**截图/点击坐标漂移**、**覆盖层只铺满屏幕一角且发虚** —— 见 [DPI 与坐标](#dpi-与坐标高缩放必读)。
 
-[![Download](https://img.shields.io/badge/Download-latest-2e7d32?style=flat&logo=github&logoColor=white)](https://github.com/zzy6-a/vision-use/releases/latest)
+[![Download](https://img.shields.io/badge/Download-fork-2e7d32?style=flat&logo=github&logoColor=white)](https://github.com/liuzwZYW/dsh-vision-use)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-2f6fed)](https://github.com/topics/dsh-plugin)
 
@@ -49,16 +51,16 @@
 
 ## 安装
 
-### 方式一：GitHub Release（推荐）
+### 方式一：git 源（本 fork，推荐）
 
 ```bash
-dsh plugin --profile web add https://github.com/zzy6-a/vision-use/releases/download/v0.2.0/dsh-vision-0.2.0.tgz
+dsh plugin --profile web add github:liuzwZYW/dsh-vision-use
 ```
 
-### 方式二：git 源
+### 方式二：本地目录
 
 ```bash
-dsh plugin --profile web add github:zzy6-a/vision-use
+dsh plugin --profile web add /path/to/dsh-vision-use
 ```
 
 装完**重启 DSH**（`client.js` 半边需要启动时注册），浏览器刷新后输入框下方会出现状态胶囊。
@@ -76,6 +78,35 @@ dsh plugin --profile web add github:zzy6-a/vision-use
 > 打开记事本打一段字
 
 Agent 会自动：起覆盖层 → `view_screen` 看 → `computer_*` 动手 → 再看验证。你随时可以按 **Esc** 喊停。
+
+---
+
+## DPI 与坐标（高缩放必读）
+
+Windows 会把「没有声明 DPI 感知」的进程偷偷虚拟化：`SystemInformation.VirtualScreen` 只报告**逻辑分辨率**（物理 ÷ 缩放），`CopyFromScreen` 也只给你**物理屏幕左上 1/缩放**那一块。于是原来会出现：
+
+| 症状 | 原因 |
+|---|---|
+| Agent 只能看到屏幕左上角一小块，右下角的内容永远看不见 | 截图被限制在物理屏的左上 `1/scale` 区域（实测：3072×1920 的屏幕只截到 1536×960，且与物理像素逐点相同 = 纯裁剪，不是缩放）|
+| 覆盖层蓝框只围住屏幕左上角，线条/字号还偏细 | 边框位图按逻辑尺寸渲染，在 200% 缩放下只有设计大小的一半 |
+| 光环、涟漪位置与光标对不上，看着"糊" | 覆盖层窗口/位图在虚拟化坐标系里被系统拉伸或错位 |
+
+本 fork 的处理：`scripts/dpi.ps1` 让**所有**桌面侧 PowerShell 进程声明 **Per-Monitor-V2 DPI 感知**（逐级降级到 PMv1 / shcore / `SetProcessDPIAware`），于是
+
+- `VirtualScreen` = 真实物理分辨率，截图 **1:1 物理像素**（3072×1920 就是 3072×1920）；
+- `GetCursorPos` / `SetCursorPos` 本来就是物理像素 → **截图坐标与点击坐标同一套**；
+- 覆盖层改为「位图按物理像素分配 + 绘制沿用 96dpi 逻辑坐标（`ScaleTransform` 放大）」→ 边框铺满整屏，线条/文字/光环按物理分辨率矢量渲染，**高缩放下不再发虚**。
+
+### 传给 computer_click / computer_move 的坐标
+
+这两个工具收的是**屏幕物理像素**。而 `view_screen` 默认把截图缩到 `max_width`（默认 1600），所以图上量到的坐标**不是**屏幕坐标。两种正确做法：
+
+1. 用返回文本给的系数换算（`view_screen` 会明确写出）：
+   `screen_x = image_x × k`，`screen_y = image_y × k`（例：3072 宽的屏、1600 宽的图 → k = 1.92）
+2. 直接把图坐标原样传进去，并带上截图宽度：
+   `computer_click(x: 700, y: 380, image_width: 1600)` —— 插件会用 `physicalScreen` 自动换算
+
+自检：`computer_status` 会打印 `SCREEN 3072x1920 ORIGIN 0,0 DPI 192 SCALE 2`，或用 `cu.ps1 -Action screen` 单独查。
 
 ---
 
@@ -101,6 +132,7 @@ vision-use/
 ├── cordis.patch.yml    bundle 层：把插件行插入 profile 树
 ├── dsh.plugin.json     插件清单（dsh-market / 插件管理 UI 用）
 └── scripts/            Windows 侧工具链（自包含，随包发布）
+    ├── dpi.ps1         DPI 感知（Per-Monitor-V2）：截图/光标/覆盖层统一到物理像素
     ├── cu.ps1          鼠标/键盘执行器 + ESC 守卫
     ├── overlay-v2.ps1  覆盖层：边框/徽章/光环/涟漪 + C# 60fps 动画引擎
     ├── wocr.ps1        Windows 原生 OCR（零 API 成本兜底，可选）
@@ -154,6 +186,7 @@ vision-use/
 - **剪贴板模式默认关闭**：仅在显式 `method: 'clipboard'` 时启用（注意：它会覆盖用户剪贴板内容）
 - **WinUI（记事本等）不认注入的 Ctrl 组合键**：`computer_key` 对这类应用可能无效
 - **自绘 UI 的 UIA 坐标不可信**（Edge 标签栏、Win11 记事本标签页会返回 ∞ 或错位）：请先 `view_screen` 肉眼定位再点
+- **高 DPI（缩放 ≠ 100%）**：本 fork 已把截图 / 光标 / 覆盖层统一到**物理像素**；但 `view_screen` 仍会按 `max_width` 缩图，点击前请按返回文本给出的系数换算，或直接传 `image_width`
 - **带自绘光标的软件**（游戏、部分 Electron 应用）无法被系统级光标替换覆盖
 - **Linux / macOS 宿主**：当前只支持 Windows 原生与 WSL + Windows；其他系统下 `view_image` 可用，桌面工具会明确报错
 
@@ -165,7 +198,8 @@ vision-use/
 
 ## Contributors / 致谢
 
-- [zzy6-a](https://github.com/zzy6-a) — 作者
+- [zzy6-a](https://github.com/zzy6-a) — 原作者
+- [liuzwZYW](https://github.com/liuzwZYW) — 本 fork：修复高 DPI 坐标漂移与覆盖层模糊
 - DeepSeek V4.1 — 架构设计、实现、测试与发布流程
 
 ## 许可证

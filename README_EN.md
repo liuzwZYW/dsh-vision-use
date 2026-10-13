@@ -2,11 +2,13 @@
 
 English | [中文](README.md)
 
-> Repo: `vision-use` · Package: `dsh-vision`
+> Repo: `dsh-vision-use` (fork of [zzy6-a/vision-use](https://github.com/zzy6-a/vision-use)) · Package: `dsh-vision`
 >
 > Let the DeepSeek Harness agent **actually see your screen and operate the Windows desktop** — with a Codex-style blue overlay (press **Esc** to abort at any time).
+>
+> This fork fixes two high-DPI problems (display scaling ≠ 100%): **coordinate drift between screenshot and click** and **an overlay that only covers a corner of the screen and looks blurry** — see [DPI and coordinates](#dpi-and-coordinates-read-this-on-high-dpi).
 
-[![Download](https://img.shields.io/badge/Download-latest-2e7d32?style=flat&logo=github&logoColor=white)](https://github.com/zzy6-a/vision-use/releases/latest)
+[![Download](https://img.shields.io/badge/Download-fork-2e7d32?style=flat&logo=github&logoColor=white)](https://github.com/liuzwZYW/dsh-vision-use)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-2f6fed)](https://github.com/topics/dsh-plugin)
 
@@ -49,16 +51,16 @@ English | [中文](README.md)
 
 ## Install
 
-### Option 1: GitHub Release (recommended)
+### Option 1: git source (this fork, recommended)
 
 ```bash
-dsh plugin --profile web add https://github.com/zzy6-a/vision-use/releases/download/v0.2.0/dsh-vision-0.2.0.tgz
+dsh plugin --profile web add github:liuzwZYW/dsh-vision-use
 ```
 
-### Option 2: git source
+### Option 2: local directory
 
 ```bash
-dsh plugin --profile web add github:zzy6-a/vision-use
+dsh plugin --profile web add /path/to/dsh-vision-use
 ```
 
 After installing, **restart DSH** (the `client.js` half registers at boot). Refresh the browser and the status pill appears below the composer.
@@ -76,6 +78,33 @@ Just tell the agent:
 > Open Notepad and type something
 
 The agent will automatically: start the overlay → `view_screen` to look → `computer_*` to act → look again to verify. You can press **Esc** to stop it at any moment.
+
+---
+
+## DPI and coordinates (read this on high DPI)
+
+Windows silently virtualizes any process that has not declared DPI awareness: `SystemInformation.VirtualScreen` reports only the **logical** resolution (physical ÷ scale) and `CopyFromScreen` hands back only the **top-left `1/scale` of the physical screen**. The original symptoms were:
+
+| Symptom | Cause |
+|---|---|
+| The agent can only see the top-left corner; anything in the lower right is invisible | Capture was limited to the top-left `1/scale` region (measured: a 3072×1920 screen yielded 1536×960, pixel-identical to the physical top-left corner = pure crop, not a downscale) |
+| The blue frame only surrounds the top-left corner, with thin lines/text | The border bitmap was rendered at logical size, so at 200% scaling it was half the intended visual size |
+| Ring/ripple did not line up with the cursor and looked blurry | Overlay windows/bitmaps were positioned and stretched in the virtualized coordinate space |
+
+How this fork fixes it: `scripts/dpi.ps1` makes **every** desktop-side PowerShell process declare **Per-Monitor-V2 DPI awareness** (falling back through PMv1 / shcore / `SetProcessDPIAware`), so:
+
+- `VirtualScreen` is the real physical resolution and screenshots are **1:1 physical pixels** (3072×1920 really is 3072×1920);
+- `GetCursorPos` / `SetCursorPos` were always physical → **screenshot pixels and click pixels are now the same space**;
+- the overlay allocates bitmaps at physical size while drawing in 96-dpi logical coordinates via `ScaleTransform` → the frame covers the whole screen and lines/text/ring are rendered as vectors at physical resolution, **no more blur at high scaling**.
+
+### Coordinates for computer_click / computer_move
+
+These tools take **physical screen pixels**. `view_screen` downscales the image to `max_width` (default 1600), so pixels measured on that image are *not* screen pixels. Two correct options:
+
+1. Convert with the factor printed in the tool result: `screen_x = image_x × k` (e.g. a 3072-wide screen with a 1600-wide image → k = 1.92)
+2. Pass image pixels as-is together with the image width: `computer_click(x: 700, y: 380, image_width: 1600)` — the plugin converts using the real screen size
+
+Self-check: `computer_status` prints `SCREEN 3072x1920 ORIGIN 0,0 DPI 192 SCALE 2`, or run `cu.ps1 -Action screen`.
 
 ---
 
@@ -101,6 +130,7 @@ vision-use/
 ├── cordis.patch.yml    bundle layer: inserts the plugin row into the profile tree
 ├── dsh.plugin.json     plugin manifest (for dsh-market / the plugin manager UI)
 └── scripts/            Windows-side toolkit (self-contained, shipped with the package)
+    ├── dpi.ps1         DPI awareness (Per-Monitor-V2): screenshot/cursor/overlay all in physical pixels
     ├── cu.ps1          mouse/keyboard executor + Esc sentinel
     ├── overlay-v2.ps1  overlay: border / badge / ring / ripple + C# 60fps animation engine
     ├── wocr.ps1        Windows native OCR (zero-API-cost fallback, optional)
@@ -154,6 +184,7 @@ Privacy note: screenshots enter the current session context as image attachments
 - **Clipboard mode is opt-in**: only enabled via `method: 'clipboard'` (note: it overwrites the user's clipboard content)
 - **WinUI (Notepad, etc.) does not accept injected Ctrl combinations**: `computer_key` may not work in those apps
 - **UIA coordinates are unreliable in custom-drawn UIs** (Edge tab bar, Windows 11 Notepad tabs return ∞ or wrong offsets): use `view_screen` to locate targets visually first
+- **High DPI (scaling ≠ 100%)**: this fork unifies screenshot / cursor / overlay on **physical pixels**, but `view_screen` still downscales to `max_width`, so convert measured image pixels with the factor in the tool result — or just pass `image_width`
 - **Software with its own drawn cursor** (games, some Electron apps) cannot be overridden by the system-level cursor replacement
 - **Linux / macOS hosts**: only Windows native and WSL + Windows are supported; `view_image` still works, desktop tools fail clearly
 
@@ -165,7 +196,8 @@ Privacy note: screenshots enter the current session context as image attachments
 
 ## Contributors
 
-- [zzy6-a](https://github.com/zzy6-a) — author
+- [zzy6-a](https://github.com/zzy6-a) — original author
+- [liuzwZYW](https://github.com/liuzwZYW) — this fork: fixed high-DPI coordinate drift and overlay blur
 - DeepSeek V4.1 — architecture, implementation, testing, and release workflow
 
 ## License

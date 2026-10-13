@@ -25,7 +25,8 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
 | `typehuman -Text "..." [-DelayMs 55 -JitterMs 18]` | **SendInput Unicode 逐字输入**（WinUI 应用可用；**Chromium 会忽略**） |
 | `keys -Keys "ctrl+t,enter,esc"` | VK 组合键（Edge 接受 Ctrl 组合；WinUI 应用如记事本不接受） |
 | `wheel -Wheel 120` | 滚轮 |
-| `shot -Out path` | 截图（带光标绘制） |
+| `screen` | 打印屏幕物理分辨率 / DPI / 缩放（与截图、点击同一套物理像素坐标）|
+| `shot -Out path` | 截图（带光标绘制，物理像素） |
 | `clear-cancel` | 清除 ESC 取消标志 |
 
 ## 三、特效与 ESC 中止
@@ -40,7 +41,8 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
 
 ## 四、作业纪律（血泪教训）
 
-1. **先看后点**：点击前必须 `view_screen` 肉眼定位；截图坐标 ×(2560/截图宽) = 真实坐标
+1. **先看后点**：点击前必须 `view_screen` 肉眼定位；截图坐标 ×(屏幕物理宽 / 截图宽) = 真实坐标
+   （屏幕物理宽用 `cu.ps1 -Action screen` 或 `computer_status` 查；也可把 `image_width` 直接传给 `computer_click/computer_move` 让插件换算）
 2. **点完立刻再看**：验证是否按预期发生
 3. **绝不复用缓存坐标**：标签栏/按钮会随内容移动
 4. **自绘 UI 的 UIA 矩形不可信**：Edge 标签栏、Win11 记事本标签页会返回错误坐标或 ∞ —— 一律肉眼确认
@@ -52,6 +54,7 @@ Agent 操作 Windows 桌面（Windows 原生 / WSL + Windows，插件自动识�
 6. **前台锁定**：`SetForegroundWindow` 常失败 → 先模拟一次 ALT 键再调用（经典技巧）
 7. **模态对话框会阻塞一切**：检测到操作"无效"时，先 `view_screen` 看有没有对话框在等你
 8. **PowerShell 5.1 坑**：脚本文件要 UTF-8 BOM（否则中文按 ANSI 读）；输出中文先设 `[Console]::OutputEncoding`
+8.1 **高 DPI 坑（已修）**：桌面侧脚本一律先 `. "$PSScriptRoot\dpi.ps1"` + `Enable-DshDpi`，且必须在 `Add-Type -AssemblyName System.Windows.Forms` **之前**。否则进程是 DPI-unaware：`VirtualScreen` 只有逻辑分辨率、`CopyFromScreen` 只截到物理屏左上 1/scale、覆盖层只铺满那一角还被系统拉伸。覆盖层里的绘制一律用 96dpi 逻辑坐标 + `New-DrawSurface`（内部 `ScaleTransform`），位图仍是物理像素 —— 千万别把物理尺寸再乘一遍 scale。
 9. **`Add-Type -MemberDefinition`**：只能放成员片段，不能放整个 class；引用 `System.Drawing` 需换传 HBITMAP 句柄
 10. **`SendInput` 的 INPUT 结构体**：x64 上 union 按 `MOUSEINPUT` 对齐 = **40 字节**（只算 KEYBDINPUT 的 32 字节会被 API 直接拒绝，返回 0）
 
