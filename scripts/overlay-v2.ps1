@@ -246,6 +246,11 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
     float sigma = 30f * scale;                 // 向内衰减宽度（逻辑 30px）
     float peak = 105f;                         // 贴边处的峰值 alpha
     float inv2s2 = 1f / (2f * sigma * sigma);
+    // 直角处两条光带交汇，观感上比直边"瘦"：把角部的有效距离按比例压小，
+    // 让角部的等值线向外鼓出（渐变带更宽更浓），四角与四边观感一致。
+    float cornerBoost = 0.42f;                 // 角部有效距离压缩比例
+    float cornerSigma = 42f * scale;           // 角部影响范围（逻辑 42px）
+    float invCorner = 1f / (2f * cornerSigma * cornerSigma);
     // 起始（贴边）颜色用更深的蓝 / 琥珀：向内由 alpha 衰减自然变浅
     int cr = cancelled ? 217 : 37, cg = cancelled ? 119 : 99, cb = cancelled ? 6 : 235;
     for (int y = 0; y < h; y++) {
@@ -253,7 +258,10 @@ public static System.Drawing.Bitmap RenderFrame(int w, int h, float scale, bool 
       int row = y * stride;
       for (int x = 0; x < w; x++) {
         float dx = x + 0.5f; float dx2 = w - (x + 0.5f); if (dx2 < dx) dx = dx2;
-        float d = dx < dy ? dx : dy;
+        float n = dx < dy ? dx : dy;           // 到最近边的距离
+        float m = dx < dy ? dy : dx;           // 到另一条边的距离（角部也小）
+        float g = (float)System.Math.Exp(-m * m * invCorner);
+        float d = n * (1f - cornerBoost * g);
         float a = peak * (float)System.Math.Exp(-d * d * inv2s2);
         if (a < 0.6f) continue;
         if (a > 255f) a = 255f;
