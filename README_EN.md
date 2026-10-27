@@ -20,10 +20,16 @@ English | [中文](README.md)
 | 👁 **See** | `view_image` | Push any image file (Linux or Windows path) into the vision channel |
 | 🖱 **Act** | `computer_move` | Glide the cursor smoothly to (x, y) |
 | 🖱 **Act** | `computer_click` | Left / right / double click with a click ripple |
-| ⌨️ **Act** | `computer_type` | Type text (default: **real VK keystrokes**, zero clipboard; for Chinese use the IME route: `computer_key` pinyin → `space`/digit to commit) |
+| ⌨️ **Act** | `computer_type` | Type text. `method: auto` (default) sends **real VK keystrokes** for ASCII, and switches to clipboard — saving and restoring your original clipboard — when the text contains CJK or exceeds 120 chars. Also supports `uia` (ValuePattern), `clipboard`, `sendinput` |
 | ⌨️ **Act** | `computer_key` | Key combinations (`ctrl+t`, `enter`, `alt+f4`, …) |
 | 🎛 **Control** | `computer_overlay` | Start / stop / status the overlay (configurable idle auto-close) |
 | 📊 **Control** | `computer_status` | Overlay state / Esc flag / current mode / cursor position |
+| 🎯 **Target** | `uia_windows` | List top-level windows (title / pid / class / rect / which is foreground) |
+| 🎯 **Target** | `uia_tree` | Dump a window's control tree: type, name, AutomationId, rect, supported patterns |
+| 🎯 **Target** | `uia_find` | Find controls by name (also AutomationId / ClassName) — no pixel math |
+| 🎯 **Target** | `uia_locate` | Return a close-up crop centred on a control; the reply carries **no coordinates** |
+| 🎯 **Target** | `uia_click` | Click a control by name through UI Automation patterns (invoke / toggle / select / expand) — **does not move your mouse**; returns a before/after UI fingerprint |
+| ⚡ **Batch** | `computer_sequence` | Run several actions in one call: `click:x,y\|type:text\|key:enter\|wait:ms\|shot:path.png` — saves 3-5 model round-trips |
 
 ### Visual feedback (Codex style)
 
@@ -150,14 +156,26 @@ Privacy note: screenshots enter the current session context as image attachments
 ## Known limitations
 
 - **Chromium ignores `KEYEVENTF_UNICODE` injection**: type into Edge/Chrome/WeChat with `typevk` (real VK keystrokes, works across apps)
-- **Chinese / non-ASCII goes through the IME**: `computer_key` with pinyin letters (e.g. `n,i,h,a,o`) then `computer_key` `space` (or a digit) to commit; the default `computer_type` path **rejects** non-ASCII on purpose instead of silently falling back to the clipboard
-- **Clipboard mode is opt-in**: only enabled via `method: 'clipboard'` (note: it overwrites the user's clipboard content)
+- **Chinese / non-ASCII can only go through the clipboard on this host**: `typevk` drops CJK (VK has no CJK keycodes), `SendChar`/`KEYEVENTF_UNICODE` is silently ignored by Windows 11 Notepad and Chromium, and UIA `ValuePattern` is not supported by every control. `method: auto` therefore routes CJK (and >120-char ASCII) through the clipboard, **saving and restoring your original clipboard content**
+- **`clipboard` mode is explicit**: `method: 'clipboard'` forces it; it also restores the previous clipboard content
+- **Pinyin + candidate selection** (`computer_key` pinyin → `space`/digit) still works but is unreliable — candidate order depends on the IME dictionary and context
 - **WinUI (Notepad, etc.) does not accept injected Ctrl combinations**: `computer_key` may not work in those apps
 - **UIA coordinates are unreliable in custom-drawn UIs** (Edge tab bar, Windows 11 Notepad tabs return ∞ or wrong offsets): use `view_screen` to locate targets visually first
 - **Software with its own drawn cursor** (games, some Electron apps) cannot be overridden by the system-level cursor replacement
 - **Linux / macOS hosts**: only Windows native and WSL + Windows are supported; `view_image` still works, desktop tools fail clearly
 
 ---
+
+## What's new in 0.3.0
+
+| Area | Change |
+| --- | --- |
+| **UI Automation** | `uia_windows` / `uia_tree` / `uia_find` / `uia_locate` / `uia_click` — locate controls by name instead of guessing pixels; `uia_click` uses invoke/toggle/select/expand patterns, so it **does not move your mouse** |
+| **Batch actions** | `computer_sequence` runs click / type / key / wait / shot in one PowerShell process and one model round-trip — typically saves 30-60 s per task |
+| **Capture** | `view_screen` gained `hwnd` (PrintWindow — captures a **covered** window), `region`, `grid` (coordinate rulers) and `marker_x`/`marker_y` (crosshair to verify a target) |
+| **Input** | `computer_type` gained `method: auto` — ASCII stays on real keystrokes; CJK and long text fall back to the clipboard, which is saved and restored |
+| **Safety** | Desktop actions are serialized (parallel tool calls can no longer fight over the cursor); Esc only blocks mutating actions, so `computer_status` still answers afterwards; injection into the DSH host window is refused unless `-Force` |
+| **Fixes** | Temp-dir leak (`%TEMP%\dsh-vision-*` accumulated one dir per screenshot), `typevk` taking 53 s per 1000 chars, `seq` unable to type a literal `\|` |
 
 ## Related projects
 

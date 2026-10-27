@@ -171,3 +171,72 @@ vision-use/
 ## 许可证
 
 MIT © 2026 zzy6-a
+
+---
+
+## v0.3.0 · UIA 定位能力（2026-10-27）
+
+这一版补的是**「不用算坐标也能点」**。灵感来自生态里几个成熟实现，具体借鉴点：
+
+| 借鉴来源 | 借鉴的东西 | 落到哪里 |
+| --- | --- | --- |
+| [Yu-tao-Li/dsh-computer-use-win](https://github.com/Yu-tao-Li/dsh-computer-use-win) | 用 UI Automation 控件树定位而不是纯坐标；Electron/Chromium 需要先唤醒无障碍层 | `uia_tree` / `uia_find` + `Wake-Uia`（WM_GETOBJECT） |
+| [STARDUSTLC666/deepseek-computer-use](https://github.com/STARDUSTLC666/deepseek-computer-use) | 操作后要求重新观察；会话级授权与审计 | `uia_click` 的前后指纹对比 + `~/.dsh/vision/audit-*.jsonl` |
+| [sxwsc667/dsh-use-computer](https://github.com/sxwsc667/dsh-use-computer) | 「坐标不进对话」：只回以目标为中心的近景图 | `uia_locate` |
+| [rayadesune/DSH-computer-use](https://github.com/rayadesune/DSH-computer-use) | 截图带坐标网格标尺；干跑模式 | `view_screen` 的 `grid` / `marker_x` / `marker_y`；`-DryRun` |
+| 原生 Win32 | `PrintWindow(PW_RENDERFULLCONTENT)` 截被遮挡窗口 | `view_screen` / `uia_locate` 的 `hwnd` 参数 |
+
+### 新工具
+
+| 工具 | 作用 | 是否需要鼠标 |
+| --- | --- | --- |
+| `uia_windows` | 列顶层窗口：标题 / pid / class / rect / center / 前台标记 | 否 |
+| `uia_tree` | 一个窗口的控件树：类型 / 名称 / AutomationId / 矩形 / pattern 列表 | 否 |
+| `uia_find` | 按名字模糊找控件（也匹配 AutomationId / ClassName），返回候选清单 | 否 |
+| `uia_locate` | 找到控件 → 回一张以它为中心的**近景图**，不带坐标 | 否 |
+| `uia_click` | 按名字点：优先 invoke / toggle / select / expand pattern，退化才用坐标 | **否**（pattern 命中时） |
+
+`uia_click` 的回执示例：
+
+```
+clicked: Button "加粗(Ctrl+B)" @450,112 via toggle-pattern (no mouse movement)
+toggle state now: On
+ui changed: NO  fingerprint 42D94E5ECD7F -> 42D94E5ECD7F
+window now: "无标题 - Notepad"  focused: Button "更多选项"
+```
+
+### `view_screen` 增强
+
+```js
+view_screen({ hwnd: 1641304, region: "400,60,700,320", grid: 100, marker_x: 450, marker_y: 112 })
+```
+
+- `hwnd`：走 PrintWindow，**窗口被遮挡也能截到真实内容**（实测 Win11 + Chromium 156 有效）
+- `region`：只截一块，越界自动夹到桌面边界
+- `grid`：画坐标标尺，左上/左侧标注**全局坐标**
+- `marker_x/y`：在目标点画红十字，用来确认「这是不是我要点的那个」
+
+### 已知边界
+
+- **Chromium / Electron 自绘界面**：UIA 树很多时候只有几个 `Chrome_RenderWidgetHostHWND` 节点。已加 `WM_GETOBJECT` 唤醒，但应用自己不开 accessibility 就拿不到控件 —— 这类目标退回 `view_screen` + 坐标。
+- **PrintWindow 黑图**：部分应用（老式 OpenGL / 某类游戏）不支持，此时 `view_screen` 自动退回屏幕捕获。
+- **坐标点击兜底会移动鼠标**，`uia_click` 的回执里会写明 `via mouse-click`，据此区分。
+
+### 审计日志
+
+每次 `uia_click` / `uia_locate` / `view_screen` 追加一行到 `~/.dsh/vision/audit-YYYY-MM-DD.jsonl`：
+
+```json
+{"ts":1793101196129,"tool":"uia_click","name":"加粗","how":"toggle-pattern","matched":"加粗(Ctrl+B)","changed":true,"fpBefore":"42D94E5ECD7F","fpAfter":"763BB639F94C"}
+```
+
+### 开发提醒
+
+改了这个插件的 `lib/index.js` 之后，**不要用 `dev_reload_package` 热重载** —— 实测两次都把 DSH 主进程带崩（端口从 13493 → 18168 → 57914）。正确做法：
+
+```powershell
+# 免重启：先卸载再注入
+dev_uninject_plugin  match=dsh-vision
+dev_inject_plugin    dir=C:\Users\19827\.dsh\plugins\dsh-vision
+# 或者干脆重启 DSH（插件已在 profile bundles 里，重启即按磁盘加载）
+```

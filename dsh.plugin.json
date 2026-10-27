@@ -15,7 +15,13 @@
       "computer_click",
       "computer_type",
       "computer_key",
-      "computer_overlay"
+      "computer_overlay",
+      "computer_sequence",
+      "uia_windows",
+      "uia_tree",
+      "uia_find",
+      "uia_locate",
+      "uia_click"
     ],
     "skills": []
   },
