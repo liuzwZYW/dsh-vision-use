@@ -1,6 +1,6 @@
 {
-  "id": "liuzwZYW/dsh-vision-use",
-  "version": "0.2.10",
+  "id": "@liuzw/dsh-vision",
+  "version": "0.3.0",
   "main": "./lib/index.js",
   "description": "DSH Computer Use: agent vision channel + desktop control, auto-detecting Windows native or WSL hosts. Mouse/keyboard tools with a forced Codex-style overlay, Esc abort, and a composer status pill.",
   "engines": {
@@ -15,7 +15,13 @@
       "computer_click",
       "computer_type",
       "computer_key",
-      "computer_overlay"
+      "computer_overlay",
+      "computer_sequence",
+      "uia_windows",
+      "uia_tree",
+      "uia_find",
+      "uia_locate",
+      "uia_click"
     ],
     "skills": []
   },

@@ -1,8 +1,8 @@
 {
   "name": "@liuzw/dsh-vision",
-  "version": "0.2.10",
+  "version": "0.3.0",
   "type": "module",
-  "description": "DSH Computer Use (vision + desktop control, auto-detects Windows native or WSL): see the Windows screen through the agent vision channel, drive mouse/keyboard with a Codex computer-use style red overlay (Esc to abort), plus a composer status pill.",
+  "description": "DSH Computer Use for Windows: see the screen, drive it with real input, and target controls by name through UI Automation (patterns click without moving your mouse). Adds action sequences, window/region capture with coordinate grids, DPI-aware coordinates, and a Codex-style red overlay with Esc abort.",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",
@@ -52,7 +52,11 @@
     "screenshot",
     "desktop-automation",
     "windows",
-    "wsl"
+    "wsl",
+    "ui-automation",
+    "uia",
+    "accessibility",
+    "automation"
   ],
   "engines": {
     "node": ">=22"

@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 中文
 
-> 仓库：`dsh-vision-use`（fork 自 [zzy6-a/vision-use](https://github.com/zzy6-a/vision-use)）· 包名：`dsh-vision`
+> 仓库：`dsh-vision-use`（fork 自 [zzy6-a/vision-use](https://github.com/zzy6-a/vision-use)）· 包名 / 插件 id：`@liuzw/dsh-vision`
 >
 > 让 DeepSeek Harness 的 Agent **真正看见你的屏幕、并动手操作 Windows 桌面** —— 带 Codex computer use 风格的红色操作覆盖层（按 **Esc** 随时中止）。
 >
@@ -25,7 +25,11 @@
 | ⌨️ **动** | `computer_type` | 输入文字（默认 **VK 真实按键逐键注入**，零剪贴板；中文走输入法：`computer_key` 发拼音 → `space`/数字上屏）|
 | ⌨️ **动** | `computer_key` | 组合键（`ctrl+t` / `enter` / `alt+f4` …）|
 | 🎛 **控** | `computer_overlay` | 启停操作覆盖层（start/stop/status，可设空闲自动关）|
-| 📊 **控** | `computer_status` | 覆盖层状态 / ESC 标志 / 当前模式 / 光标位置 |
+| 📊 **控** | `computer_status` | 覆盖层状态 / ESC 标志 / 当前模式 / 光标位置 / 解释器 |
+| 🎬 **动** | `computer_sequence` | 一串 move/click/type/key 顺序执行，中途按 Esc 即停 |
+| 🧭 **定** | `uia_windows` / `uia_tree` | 列窗口 / 导出控件树（类型、名称、矩形、可用 pattern）|
+| 🧭 **定** | `uia_find` / `uia_locate` | 按名字找控件 / 回一张以控件为中心的近景图 |
+| 🧭 **定** | `uia_click` | 按名字点：优先走 UIA pattern（不移动鼠标），退化才用坐标 |
 
 ### 视觉反馈（Codex 风格）
 
@@ -44,7 +48,7 @@
 - **整套光标**（箭头 / I 形 / 手指）都是统一的红白渐变风格，且**保留 Windows 原生语境切换**
 - **强制覆盖层**：所有 hands 操作（move/click/type/key）都会先强制拉起覆盖层，不存在“静默操作”
 - **ESC 中止**：按下即写取消标志 → 覆盖层退出 → 后续所有动作被拒绝
-- **任务级保活**：只要本回合 agent 还在工作（思考 / 执行其他工具），覆盖层就不会收；回合结束后约 4 秒收起。覆盖层自身仍有空闲兜底（`idle_seconds`，默认 30，0 = 关闭兜底）
+- **任务级保活**：只要本回合 agent 还在工作（思考 / 执行其他工具），覆盖层就不会收；回合结束后约 4 秒收起。覆盖层自身仍有空闲兜底（`idle_seconds`，默认 600，0 = 关闭兜底）
 - **输入框下方的状态胶囊**：彩色圆点 + `CU 待命/移动/输入/点击` + 「停止」按钮
 
 ---
@@ -62,6 +66,10 @@ dsh plugin --profile web add github:liuzwZYW/dsh-vision-use
 ```bash
 dsh plugin --profile web add /path/to/dsh-vision-use
 ```
+
+> 插件 id 就是 npm 包名 `@liuzw/dsh-vision`（`dsh.plugin.json` 的 `id` 与 `package.json` 的 `name` 必须一致）。
+> 早期版本把 `id` 写成了 GitHub 仓库名 `liuzwZYW/dsh-vision-use`，插件管理面板卸载时会拼出
+> `pnpm remove liuzwZYW/dsh-vision-use` 并失败；从 v0.3.0 起已修正。
 
 装完**重启 DSH**（`client.js` 半边需要启动时注册），浏览器刷新后输入框下方会出现状态胶囊。
 
@@ -105,8 +113,69 @@ Windows 会把「没有声明 DPI 感知」的进程偷偷虚拟化：`SystemInf
    `screen_x = image_x × k`，`screen_y = image_y × k`（例：3072 宽的屏、1600 宽的图 → k = 1.92）
 2. 直接把图坐标原样传进去，并带上截图宽度：
    `computer_click(x: 700, y: 380, image_width: 1600)` —— 插件会用 `physicalScreen` 自动换算
+3. `window` / `region` / `hwnd` 截图还要带区域原点，否则只有缩放没有偏移：
+   `computer_click(x: 320, y: 90, image_width: 1600, image_region: "400,60,2560,1440")`
+   （`view_screen` 返回文本里的 `<coords>` 会直接给出可复制的 `image_width` 与 `image_region`）
 
 自检：`computer_status` 会打印 `SCREEN 3072x1920 ORIGIN 0,0 DPI 192 SCALE 2`，或用 `cu.ps1 -Action screen` 单独查。
+
+---
+
+## v0.3.0 · UIA 定位能力（2026-10-27）
+
+这一版补的是**「不用算坐标也能点」**。灵感来自生态里几个成熟实现，具体借鉴点：
+
+| 借鉴来源 | 借鉴的东西 | 落到哪里 |
+| --- | --- | --- |
+| [Yu-tao-Li/dsh-computer-use-win](https://github.com/Yu-tao-Li/dsh-computer-use-win) | 用 UI Automation 控件树定位而不是纯坐标；Electron/Chromium 需要先唤醒无障碍层 | `uia_tree` / `uia_find` + `Wake-Uia`（WM_GETOBJECT） |
+| [STARDUSTLC666/deepseek-computer-use](https://github.com/STARDUSTLC666/deepseek-computer-use) | 操作后要求重新观察；会话级授权与审计 | `uia_click` 的前后指纹对比 + `~/.dsh/vision/audit-*.jsonl` |
+| [sxwsc667/dsh-use-computer](https://github.com/sxwsc667/dsh-use-computer) | 「坐标不进对话」：只回以目标为中心的近景图 | `uia_locate` |
+| [rayadesune/DSH-computer-use](https://github.com/rayadesune/DSH-computer-use) | 截图带坐标网格标尺；干跑模式 | `view_screen` 的 `grid` / `marker_x` / `marker_y`；`-DryRun` |
+| 原生 Win32 | `PrintWindow(PW_RENDERFULLCONTENT)` 截被遮挡窗口 | `view_screen` / `uia_locate` 的 `hwnd` 参数 |
+
+### 新工具
+
+| 工具 | 作用 | 是否需要鼠标 |
+| --- | --- | --- |
+| `uia_windows` | 列顶层窗口：标题 / pid / class / rect / center / 前台标记 | 否 |
+| `uia_tree` | 一个窗口的控件树：类型 / 名称 / AutomationId / 矩形 / pattern 列表 | 否 |
+| `uia_find` | 按名字模糊找控件（也匹配 AutomationId / ClassName），返回候选清单 | 否 |
+| `uia_locate` | 找到控件 → 回一张以它为中心的**近景图**，不带坐标 | 否 |
+| `uia_click` | 按名字点：优先 invoke / toggle / select / expand pattern，退化才用坐标 | **否**（pattern 命中时） |
+
+`uia_click` 的回执示例：
+
+```
+clicked: Button "加粗(Ctrl+B)" @450,112 via toggle-pattern (no mouse movement)
+toggle state now: On
+ui changed: NO  fingerprint 42D94E5ECD7F -> 42D94E5ECD7F
+window now: "无标题 - Notepad"  focused: Button "更多选项"
+```
+
+### `view_screen` 增强
+
+```js
+view_screen({ hwnd: 1641304, region: "400,60,700,320", grid: 100, marker_x: 450, marker_y: 112 })
+```
+
+- `hwnd`：走 PrintWindow，**窗口被遮挡也能截到真实内容**（实测 Win11 + Chromium 156 有效）
+- `region`：只截一块，越界自动夹到桌面边界
+- `grid`：画坐标标尺，左上/左侧标注**全局坐标**
+- `marker_x/y`：在目标点画红十字，用来确认「这是不是我要点的那个」
+
+### 已知边界
+
+- **Chromium / Electron 自绘界面**：UIA 树很多时候只有几个 `Chrome_RenderWidgetHostHWND` 节点。已加 `WM_GETOBJECT` 唤醒，但应用自己不开 accessibility 就拿不到控件 —— 这类目标退回 `view_screen` + 坐标。
+- **PrintWindow 黑图**：部分应用（老式 OpenGL / 某类游戏）不支持，此时 `view_screen` 自动退回屏幕捕获。
+- **坐标点击兜底会移动鼠标**，`uia_click` 的回执里会写明 `via mouse-click`，据此区分。
+
+### 审计日志
+
+每次 `uia_click` / `uia_locate` / `view_screen` 追加一行到 `~/.dsh/vision/audit-YYYY-MM-DD.jsonl`：
+
+```json
+{"ts":1793101196129,"tool":"uia_click","name":"加粗","how":"toggle-pattern","matched":"加粗(Ctrl+B)","changed":true,"fpBefore":"42D94E5ECD7F","fpAfter":"763BB639F94C"}
+```
 
 ---
 
@@ -136,13 +205,14 @@ Windows 会把「没有声明 DPI 感知」的进程偷偷虚拟化：`SystemInf
 
 ```
 vision-use/
-├── lib/index.js        host 半边：8 个工具 + 2 条 API 路由 + systemPrompt 能力宣告
+├── lib/index.js        host 半边：14 个工具 + 2 条 API 路由 + systemPrompt 能力宣告
 ├── lib/client.js       browser 半边：composer-dock 状态胶囊
 ├── cordis.patch.yml    bundle 层：把插件行插入 profile 树
 ├── dsh.plugin.json     插件清单（dsh-market / 插件管理 UI 用）
 └── scripts/            Windows 侧工具链（自包含，随包发布）
     ├── dpi.ps1         DPI 感知（Per-Monitor-V2）：截图/光标/覆盖层统一到物理像素
-    ├── cu.ps1          鼠标/键盘执行器 + ESC 守卫
+    ├── cu.ps1          鼠标/键盘执行器 + 截图 + ESC 守卫
+    ├── uia.ps1         UI Automation 定位/pattern 点击/前后指纹
     ├── overlay-v2.ps1  覆盖层：边框/徽章/光环/涟漪 + C# 60fps 动画引擎
     └── TOOLKIT.md      工具链详细文档 + 10 条实战纪律
 ```
@@ -169,7 +239,7 @@ vision-use/
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `computer_overlay start idle_seconds` | `30` | 覆盖层自身的空闲兜底秒数；任务进行中插件会持续续心跳，不会在思考时消失（0 = 关闭兜底）|
+| `computer_overlay start idle_seconds` | `600` | 覆盖层自身的空闲兜底秒数；任务进行中插件会持续续心跳，不会在思考时消失（0 = 关闭兜底）|
 | `-MaxSeconds` | `0` | 覆盖层最长存活时间（0 = 不限）|
 | `-NoCursorChange` | 关 | 不安装红色光标套装（保留系统默认光标）|
 
@@ -189,11 +259,11 @@ vision-use/
 ## 已知限制
 
 - **Chromium 忽略 `KEYEVENTF_UNICODE` 注入**：往 Edge/Chrome/微信打字用 `typevk`（真实 VK 按键，跨应用通用）
-- **中文/非 ASCII 走输入法**：`computer_key` 依次发拼音字母（如 `n,i,h,a,o`）→ `computer_key` `space`（或数字键选候选）上屏；`computer_type` 的默认路径会**明确拒绝**非 ASCII 而不是偷偷回退剪贴板
-- **剪贴板模式默认关闭**：仅在显式 `method: 'clipboard'` 时启用（注意：它会覆盖用户剪贴板内容）
+- **中文/非 ASCII 优先走输入法**：`computer_key` 依次发拼音字母（如 `n,i,h,a,o`）→ `computer_key` `space`（或数字键选候选）上屏
+- **`computer_type` 的 `auto` 策略**：纯 ASCII 短文本走真实 VK 按键（零剪贴板）；含中文/非 ASCII 或超过 120 字符时才走剪贴板，且**会保存并还原**用户原剪贴板。显式 `method: 'vk'` 时非 ASCII 会被丢弃而不是静默改道
 - **WinUI（记事本等）不认注入的 Ctrl 组合键**：`computer_key` 对这类应用可能无效
 - **自绘 UI 的 UIA 坐标不可信**（Edge 标签栏、Win11 记事本标签页会返回 ∞ 或错位）：请先 `view_screen` 肉眼定位再点
-- **高 DPI（缩放 ≠ 100%）**：本 fork 已把截图 / 光标 / 覆盖层统一到**物理像素**；但 `view_screen` 仍会按 `max_width` 缩图，点击前请按返回文本给出的系数换算，或直接传 `image_width`
+- **高 DPI（缩放 ≠ 100%）**：本 fork 已把截图 / 光标 / 覆盖层统一到**物理像素**；但 `view_screen` 仍会按 `max_width` 缩图，点击前请按返回文本给出的系数换算，或直接传 `image_width`（区域截图再加 `image_region`）
 - **带自绘光标的软件**（游戏、部分 Electron 应用）无法被系统级光标替换覆盖
 - **Linux / macOS 宿主**：当前只支持 Windows 原生与 WSL + Windows；其他系统下 `view_image` 可用，桌面工具会明确报错
 
@@ -208,6 +278,19 @@ vision-use/
 - [zzy6-a](https://github.com/zzy6-a) — 原作者
 - [liuzwZYW](https://github.com/liuzwZYW) — 本 fork：修复高 DPI 坐标漂移与覆盖层模糊
 - DeepSeek V4.1 — 架构设计、实现、测试与发布流程
+
+## 开发提醒：改完 lib/index.js 别热重载
+
+改了这个插件的 `lib/index.js` 之后，**不要用 `dev_reload_package` 热重载** —— 实测两次都把 DSH 主进程带崩（端口从 13493 → 18168 → 57914）。正确做法：
+
+```powershell
+# 免重启：先卸载再注入
+dev_uninject_plugin  match=dsh-vision
+dev_inject_plugin    dir=C:\Users\19827\.dsh\plugins\dsh-vision
+# 或者干脆重启 DSH（插件已在 profile bundles 里，重启即按磁盘加载）
+```
+
+---
 
 ## 许可证
 

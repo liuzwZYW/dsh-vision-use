@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-> Repo: `dsh-vision-use` (fork of [zzy6-a/vision-use](https://github.com/zzy6-a/vision-use)) · Package: `dsh-vision`
+> Repo: `dsh-vision-use` (fork of [zzy6-a/vision-use](https://github.com/zzy6-a/vision-use)) · Package / plugin id: `@liuzw/dsh-vision`
 >
 > Let the DeepSeek Harness agent **actually see your screen and operate the Windows desktop** — with a Codex computer-use style red overlay (press **Esc** to abort at any time).
 >
@@ -22,10 +22,16 @@ English | [中文](README.md)
 | 👁 **See** | `view_image` | Push any image file (Linux or Windows path) into the vision channel |
 | 🖱 **Act** | `computer_move` | Glide the cursor smoothly to (x, y) |
 | 🖱 **Act** | `computer_click` | Left / right / double click with a click ripple |
-| ⌨️ **Act** | `computer_type` | Type text (default: **real VK keystrokes**, zero clipboard; for Chinese use the IME route: `computer_key` pinyin → `space`/digit to commit) |
+| ⌨️ **Act** | `computer_type` | Type text. `method: auto` (default) sends **real VK keystrokes** for ASCII, and switches to clipboard — saving and restoring your original clipboard — when the text contains CJK or exceeds 120 chars. Also supports `uia` (ValuePattern), `clipboard`, `sendinput` |
 | ⌨️ **Act** | `computer_key` | Key combinations (`ctrl+t`, `enter`, `alt+f4`, …) |
 | 🎛 **Control** | `computer_overlay` | Start / stop / status the overlay (configurable idle auto-close) |
 | 📊 **Control** | `computer_status` | Overlay state / Esc flag / current mode / cursor position |
+| 🎯 **Target** | `uia_windows` | List top-level windows (title / pid / class / rect / which is foreground) |
+| 🎯 **Target** | `uia_tree` | Dump a window's control tree: type, name, AutomationId, rect, supported patterns |
+| 🎯 **Target** | `uia_find` | Find controls by name (also AutomationId / ClassName) — no pixel math |
+| 🎯 **Target** | `uia_locate` | Return a close-up crop centred on a control; the reply carries **no coordinates** |
+| 🎯 **Target** | `uia_click` | Click a control by name through UI Automation patterns (invoke / toggle / select / expand) — **does not move your mouse**; returns a before/after UI fingerprint |
+| ⚡ **Batch** | `computer_sequence` | Run several actions in one call: `click:x,y\|type:text\|key:enter\|wait:ms\|shot:path.png` — saves 3-5 model round-trips |
 
 ### Visual feedback (Codex style)
 
@@ -44,7 +50,7 @@ English | [中文](README.md)
 - **One cursor set** (arrow / I-beam / hand) in a unified red-and-white gradient, while **keeping Windows' native context switching**
 - **Overlay always on**: every hands operation (move/click/type/key) is forced to bring up the overlay first — no silent control
 - **Esc abort**: the keypress writes a cancel flag → the overlay exits → every subsequent action is rejected
-- **Task-level keep-alive**: while the agent is still working in this turn (thinking or running other tools), the overlay stays up; it packs up about 4 seconds after the turn ends. The overlay's own idle timeout remains as a fallback (`idle_seconds`, default 30, 0 = disable fallback)
+- **Task-level keep-alive**: while the agent is still working in this turn (thinking or running other tools), the overlay stays up; it packs up about 4 seconds after the turn ends. The overlay's own idle timeout remains as a fallback (`idle_seconds`, default 600, 0 = disable fallback)
 - **Status pill under the composer**: colored dot + `CU idle/move/type/click` + a Stop button
 
 ---
@@ -62,6 +68,10 @@ dsh plugin --profile web add github:liuzwZYW/dsh-vision-use
 ```bash
 dsh plugin --profile web add /path/to/dsh-vision-use
 ```
+
+> The plugin id **is** the npm package name, `@liuzw/dsh-vision` (`dsh.plugin.json` → `id` must equal `package.json` → `name`).
+> Earlier builds used the GitHub slug `liuzwZYW/dsh-vision-use`, so the plugin-manager panel asked pnpm to
+> `remove liuzwZYW/dsh-vision-use` and failed; fixed in v0.3.0.
 
 After installing, **restart DSH** (the `client.js` half registers at boot). Refresh the browser and the status pill appears below the composer.
 
@@ -103,6 +113,7 @@ These tools take **physical screen pixels**. `view_screen` downscales the image 
 
 1. Convert with the factor printed in the tool result: `screen_x = image_x × k` (e.g. a 3072-wide screen with a 1600-wide image → k = 1.92)
 2. Pass image pixels as-is together with the image width: `computer_click(x: 700, y: 380, image_width: 1600)` — the plugin converts using the real screen size
+3. Window / region / hwnd captures also need the region origin, otherwise you get scaling without the offset: `computer_click(x: 320, y: 90, image_width: 1600, image_region: "400,60,2560,1440")` (the `<coords>` block in the `view_screen` result prints exactly these values)
 
 Self-check: `computer_status` prints `SCREEN 3072x1920 ORIGIN 0,0 DPI 192 SCALE 2`, or run `cu.ps1 -Action screen`.
 
@@ -134,13 +145,14 @@ At startup the plugin probes `pwsh.exe` (PowerShell 7) first, then `powershell.e
 
 ```
 vision-use/
-├── lib/index.js        host half: 8 tools + 2 API routes + systemPrompt capability declaration
+├── lib/index.js        host half: 14 tools + 2 API routes + systemPrompt capability declaration
 ├── lib/client.js       browser half: composer-dock status pill
 ├── cordis.patch.yml    bundle layer: inserts the plugin row into the profile tree
 ├── dsh.plugin.json     plugin manifest (for dsh-market / the plugin manager UI)
 └── scripts/            Windows-side toolkit (self-contained, shipped with the package)
     ├── dpi.ps1         DPI awareness (Per-Monitor-V2): screenshot/cursor/overlay all in physical pixels
-    ├── cu.ps1          mouse/keyboard executor + Esc sentinel
+    ├── cu.ps1          mouse/keyboard executor + capture + Esc sentinel
+    ├── uia.ps1         UI Automation targeting / pattern clicks / before-after fingerprint
     ├── overlay-v2.ps1  overlay: border / badge / ring / ripple + C# 60fps animation engine
     └── TOOLKIT.md      toolkit documentation + 10 field-tested rules
 ```
@@ -167,7 +179,7 @@ PowerShell children learn the cross-boundary flag directory through the `DSH_VIS
 
 | Parameter | Default | Description |
 |---|---|---|
-| `computer_overlay start idle_seconds` | `30` | Overlay idle-timeout fallback; during an active task the plugin keeps refreshing the heartbeat, so it will not vanish while the agent is thinking (0 = disable fallback) |
+| `computer_overlay start idle_seconds` | `600` | Overlay idle-timeout fallback; during an active task the plugin keeps refreshing the heartbeat, so it will not vanish while the agent is thinking (0 = disable fallback) |
 | `-MaxSeconds` | `0` | Maximum overlay lifetime (0 = unlimited) |
 | `-NoCursorChange` | off | Do not install the red cursor set (keep the system default) |
 
@@ -187,15 +199,27 @@ Privacy note: screenshots enter the current session context as image attachments
 ## Known limitations
 
 - **Chromium ignores `KEYEVENTF_UNICODE` injection**: type into Edge/Chrome/WeChat with `typevk` (real VK keystrokes, works across apps)
-- **Chinese / non-ASCII goes through the IME**: `computer_key` with pinyin letters (e.g. `n,i,h,a,o`) then `computer_key` `space` (or a digit) to commit; the default `computer_type` path **rejects** non-ASCII on purpose instead of silently falling back to the clipboard
-- **Clipboard mode is opt-in**: only enabled via `method: 'clipboard'` (note: it overwrites the user's clipboard content)
+- **Chinese / non-ASCII can only go through the clipboard on this host**: `typevk` drops CJK (VK has no CJK keycodes), `SendChar`/`KEYEVENTF_UNICODE` is silently ignored by Windows 11 Notepad and Chromium, and UIA `ValuePattern` is not supported by every control. `method: auto` therefore routes CJK (and >120-char ASCII) through the clipboard, **saving and restoring your original clipboard content**
+- **`clipboard` mode is explicit**: `method: 'clipboard'` forces it; it also restores the previous clipboard content
+- **Pinyin + candidate selection** (`computer_key` pinyin → `space`/digit) still works but is unreliable — candidate order depends on the IME dictionary and context
 - **WinUI (Notepad, etc.) does not accept injected Ctrl combinations**: `computer_key` may not work in those apps
 - **UIA coordinates are unreliable in custom-drawn UIs** (Edge tab bar, Windows 11 Notepad tabs return ∞ or wrong offsets): use `view_screen` to locate targets visually first
-- **High DPI (scaling ≠ 100%)**: this fork unifies screenshot / cursor / overlay on **physical pixels**, but `view_screen` still downscales to `max_width`, so convert measured image pixels with the factor in the tool result — or just pass `image_width`
+- **High DPI (scaling ≠ 100%)**: this fork unifies screenshot / cursor / overlay on **physical pixels**, but `view_screen` still downscales to `max_width`, so convert measured image pixels with the factor in the tool result — or just pass `image_width` (plus `image_region` for window/region captures)
 - **Software with its own drawn cursor** (games, some Electron apps) cannot be overridden by the system-level cursor replacement
 - **Linux / macOS hosts**: only Windows native and WSL + Windows are supported; `view_image` still works, desktop tools fail clearly
 
 ---
+
+## What's new in 0.3.0
+
+| Area | Change |
+| --- | --- |
+| **UI Automation** | `uia_windows` / `uia_tree` / `uia_find` / `uia_locate` / `uia_click` — locate controls by name instead of guessing pixels; `uia_click` uses invoke/toggle/select/expand patterns, so it **does not move your mouse** |
+| **Batch actions** | `computer_sequence` runs click / type / key / wait / shot in one PowerShell process and one model round-trip — typically saves 30-60 s per task |
+| **Capture** | `view_screen` gained `hwnd` (PrintWindow — captures a **covered** window), `region`, `grid` (coordinate rulers) and `marker_x`/`marker_y` (crosshair to verify a target) |
+| **Input** | `computer_type` gained `method: auto` — ASCII stays on real keystrokes; CJK and long text fall back to the clipboard, which is saved and restored |
+| **Safety** | Desktop actions are serialized (parallel tool calls can no longer fight over the cursor); Esc only blocks mutating actions, so `computer_status` still answers afterwards; injection into the DSH host window is refused unless `-Force` |
+| **Fixes** | Temp-dir leak (`%TEMP%\dsh-vision-*` accumulated one dir per screenshot), `typevk` taking 53 s per 1000 chars, `seq` unable to type a literal `\|` |
 
 ## Related projects
 
