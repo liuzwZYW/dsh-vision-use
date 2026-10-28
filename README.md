@@ -67,9 +67,11 @@ dsh plugin --profile web add github:liuzwZYW/dsh-vision-use
 dsh plugin --profile web add /path/to/dsh-vision-use
 ```
 
-> 插件 id 就是 npm 包名 `@liuzw/dsh-vision`（`dsh.plugin.json` 的 `id` 与 `package.json` 的 `name` 必须一致）。
-> 早期版本把 `id` 写成了 GitHub 仓库名 `liuzwZYW/dsh-vision-use`，插件管理面板卸载时会拼出
-> `pnpm remove liuzwZYW/dsh-vision-use` 并失败；从 v0.3.0 起已修正。
+> 插件 id 就是 npm 包名 `@liuzw/dsh-vision`，三处必须一致：`package.json` 的 `name`、
+> `dsh.plugin.json` 的 `id`、`lib/client.js` 里 `__ModuleLoader__.load({ id })`。
+> 早期版本包名已改成 `@liuzw/dsh-vision`，但 client bundle 仍注册成 `dsh-vision`，
+> 于是启动报 `web boot: @liuzw/dsh-vision import failed` 和 `duplicate factory registration`；
+> v0.3.1 起已修正（旧 manifest id 还导致卸载时执行 `pnpm remove liuzwZYW/...` 失败，一并修正）。
 
 装完**重启 DSH**（`client.js` 半边需要启动时注册），浏览器刷新后输入框下方会出现状态胶囊。
 

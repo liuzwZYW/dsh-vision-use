@@ -69,9 +69,11 @@ dsh plugin --profile web add github:liuzwZYW/dsh-vision-use
 dsh plugin --profile web add /path/to/dsh-vision-use
 ```
 
-> The plugin id **is** the npm package name, `@liuzw/dsh-vision` (`dsh.plugin.json` → `id` must equal `package.json` → `name`).
-> Earlier builds used the GitHub slug `liuzwZYW/dsh-vision-use`, so the plugin-manager panel asked pnpm to
-> `remove liuzwZYW/dsh-vision-use` and failed; fixed in v0.3.0.
+> The plugin id **is** the npm package name, `@liuzw/dsh-vision`, and three places must agree:
+> `package.json` → `name`, `dsh.plugin.json` → `id`, and `__ModuleLoader__.load({ id })` in `lib/client.js`.
+> Earlier builds kept registering the client bundle as `dsh-vision` after the package rename, so web boot reported
+> `@liuzw/dsh-vision: import failed` plus `duplicate factory registration`; fixed in v0.3.1
+> (the old manifest id also made uninstall run `pnpm remove liuzwZYW/dsh-vision-use`, also fixed).
 
 After installing, **restart DSH** (the `client.js` half registers at boot). Refresh the browser and the status pill appears below the composer.
 
