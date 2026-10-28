@@ -3,5 +3,5 @@
 # (exports name / inject / apply), the patch layer only mounts it.
 - insert:
     - id: dsh-vision
-      name: 'dsh-vision'
+      name: '@liuzw/dsh-vision'
       config: {}
